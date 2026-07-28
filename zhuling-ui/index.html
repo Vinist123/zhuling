@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>铸灵 ZhuLing · Agent 工作台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <style>
+        :root {
+            --ink-deepest: #0f0c0a;
+            --ink-deep: #14110e;
+            --ink-base: #1a1612;
+            --ink-panel: #221d18;
+            --ink-panel-strong: #281f19;
+            --ink-line: #332a22;
+            --ink-line-soft: #251e18;
+
+            --bronze: #c89544;
+            --bronze-bright: #e0b560;
+            --bronze-deep: #8a6420;
+            --bronze-faint: rgba(200, 149, 68, 0.08);
+
+            --vermillion: #c54225;
+            --vermillion-bright: #e85a3a;
+
+            --jade: #5a8a6b;
+            --jade-bright: #7aad8a;
+
+            --cream: #e8dcc8;
+            --cream-bright: #f5edd9;
+            --cream-muted: #a89a85;
+            --cream-dim: #6b6358;
+
+            --shadow: 0 18px 55px rgba(0, 0, 0, 0.3);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            min-width: 320px;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            color: var(--cream);
+            background-color: var(--ink-deepest);
+            background-image:
+                radial-gradient(ellipse 60% 40% at 15% 20%, rgba(200, 149, 68, 0.04), transparent 60%),
+                radial-gradient(ellipse 50% 40% at 85% 80%, rgba(197, 66, 37, 0.03), transparent 60%);
+            font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+        }
+
+        button, textarea, select { font: inherit; }
+        button { color: inherit; }
+
+        .app-shell {
+            height: 100vh;
+            display: grid;
+            grid-template-rows: 62px minmax(0, 1fr);
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            padding: 0 22px;
+            border-bottom: 1px solid var(--ink-line);
+            background: rgba(15, 12, 10, 0.92);
+            backdrop-filter: blur(14px);
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 11px;
+            color: var(--cream);
+            font-weight: 700;
+            letter-spacing: 0;
+            white-space: nowrap;
+        }
+
+        .brand-mark {
+            display: grid;
+            place-items: center;
+            width: 32px;
+            height: 32px;
+            border: 1px solid var(--vermillion);
+            background: rgba(197, 66, 37, 0.1);
+            color: var(--vermillion-bright);
+            font-family: "Noto Serif SC", serif;
+            font-size: 0.9rem;
+            font-weight: 700;
+            border-radius: 2px;
+            box-shadow: inset 0 0 10px rgba(197, 66, 37, 0.08);
+        }
+
+        .brand-text {
+            font-family: "Noto Serif SC", serif;
+            font-size: 1.05rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            color: var(--bronze-bright);
+        }
+
+        .brand small {
+            color: var(--cream-muted);
+            font-family: "JetBrains Mono", monospace;
+            font-size: 0.65rem;
+            font-weight: 500;
+            letter-spacing: 2px;
+            margin-left: 4px;
+        }
+
+        .topbar-status {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            min-width: 0;
+            color: var(--cream-muted);
+            font-family: "JetBrains Mono", monospace;
+            font-size: 0.72rem;
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--jade-bright);
+            box-shadow: 0 0 10px rgba(122, 173, 138, 0.6);
+        }
+
+        .workspace {
+            min-height: 0;
+            display: grid;
+            grid-template-columns: 274px minmax(0, 1fr) 352px;
+        }
+
+        .sidebar, .inspector {
+            min-height: 0;
+            background: rgba(20, 17, 14, 0.88);
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--ink-line);
+        }
+
+        .sidebar-scroll, .inspector-scroll {
+            min-height: 0;
+            overflow-y: auto;
+            scrollbar-color: var(--ink-line) transparent;
+        }
+
+        .user-strip {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px;
+            border-bottom: 1px solid var(--ink-line-soft);
+        }
+
+        .avatar {
+            display: grid;
+            place-items: center;
+            width: 31px;
+            height: 31px;
+            border-radius: 50%;
+            color: var(--ink-deepest);
+            background: var(--bronze);
+            font-family: "JetBrains Mono", monospace;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .user-copy { min-width: 0; flex: 1; }
+        .user-copy strong, .user-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .user-copy strong { font-size: 0.82rem; color: var(--cream); }
+        .user-copy span { margin-top: 2px; color: var(--cream-muted); font-family: "JetBrains Mono", monospace; font-size: 0.65rem; }
+
+        .icon-btn {
+            display: inline-grid;
+            place-items: center;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            background: transparent;
+            color: var(--cream-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover, .icon-btn:focus-visible {
+            border-color: var(--ink-line);
+            color: var(--bronze-bright);
+            outline: none;
+        }
+
+        .side-section { padding: 17px 16px 0; }
+
+        .section-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 9px;
+            color: var(--cream-muted);
+            font-family: "Noto Sans SC", sans-serif;
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        select, textarea {
+            width: 100%;
+            border: 1px solid var(--ink-line);
+            border-radius: 3px;
+            background: var(--ink-panel-strong);
+            color: var(--cream);
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        select {
+            height: 39px;
+            padding: 0 10px;
+            cursor: pointer;
+        }
+
+        select:focus, textarea:focus { border-color: var(--bronze); box-shadow: 0 0 0 3px rgba(200, 149, 68, 0.08); }
+
+        .target-status {
+            min-height: 38px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-top: 8px;
+            color: var(--cream);
+            font-size: 0.72rem;
+            line-height: 1.4;
+        }
+
+        .target-status[data-state="unavailable"] { color: var(--vermillion-bright); }
+        .target-status[data-state="available"] { color: var(--jade-bright); }
+
+        .command-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 38px;
+            padding: 0 13px;
+            border: 1px solid var(--bronze-deep);
+            border-radius: 3px;
+            background: rgba(200, 149, 68, 0.06);
+            color: var(--bronze-bright);
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .command-btn:hover:not(:disabled) { background: rgba(200, 149, 68, 0.14); border-color: var(--bronze); }
+        .command-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+        .command-btn.full { width: 100%; }
+
+        .sessions-heading { padding-bottom: 9px; }
+        .session-list { padding: 0 8px 14px; }
+
+        .session-item {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            width: 100%;
+            padding: 11px 8px 11px 11px;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+        }
+
+        .session-item:hover { background: rgba(200, 149, 68, 0.04); }
+        .session-item.active { border-color: var(--bronze-deep); background: rgba(200, 149, 68, 0.06); }
+        .session-title, .session-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .session-title { color: var(--cream); font-size: 0.78rem; }
+        .session-meta { margin-top: 5px; color: var(--cream-muted); font-family: "JetBrains Mono", monospace; font-size: 0.63rem; }
+        .session-close { align-self: start; opacity: 0; }
+        .session-item:hover .session-close, .session-item.active .session-close { opacity: 1; }
+        .empty-list { padding: 26px 12px; color: var(--cream-muted); font-size: 0.74rem; text-align: center; }
+
+        .conversation {
+            min-width: 0;
+            min-height: 0;
+            display: grid;
+            grid-template-rows: 58px minmax(0, 1fr) auto;
+            background: rgba(15, 12, 10, 0.5);
+        }
+
+        .conversation-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--ink-line-soft);
+        }
+
+        .conversation-title { min-width: 0; }
+        .conversation-title h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.96rem; font-weight: 600; color: var(--cream-bright); font-family: "Noto Serif SC", serif; }
+        .conversation-title p { margin: 3px 0 0; color: var(--cream-muted); font-family: "JetBrains Mono", monospace; font-size: 0.65rem; }
+        .conversation-actions { display: flex; align-items: center; gap: 4px; }
+
+        .messages {
+            min-height: 0;
+            overflow-y: auto;
+            padding: 25px clamp(16px, 4vw, 48px) 18px;
+            scrollbar-color: var(--ink-line) transparent;
+        }
+
+        .welcome {
+            max-width: 560px;
+            margin: 9vh auto;
+            text-align: center;
+        }
+
+        .welcome-mark {
+            display: inline-grid;
+            place-items: center;
+            width: 44px;
+            height: 44px;
+            margin-bottom: 13px;
+            border: 1px solid var(--bronze-deep);
+            color: var(--bronze-bright);
+            font-family: "Noto Serif SC", serif;
+            font-size: 1.1rem;
+            font-weight: 700;
+            border-radius: 2px;
+            background: rgba(200, 149, 68, 0.05);
+        }
+        .welcome h2 { margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--cream-bright); font-family: "Noto Serif SC", serif; }
+        .welcome p { margin: 8px 0 0; color: var(--cream-muted); font-size: 0.82rem; line-height: 1.7; }
+
+        .message-row {
+            display: grid;
+            grid-template-columns: 32px minmax(0, 1fr);
+            gap: 11px;
+            max-width: 900px;
+            margin: 0 auto 21px;
+        }
+
+        .message-row.user { grid-template-columns: minmax(0, 1fr) 32px; }
+        .message-row.user .message-avatar { grid-column: 2; background: var(--bronze-deep); color: var(--bronze-bright); }
+        .message-row.user .message-body { grid-column: 1; grid-row: 1; justify-self: end; max-width: min(100%, 680px); border-color: rgba(200, 149, 68, 0.15); }
+        .message-row.assistant { cursor: pointer; }
+
+        .message-avatar {
+            display: grid;
+            place-items: center;
+            width: 32px;
+            height: 32px;
+            border: 1px solid var(--ink-line);
+            border-radius: 3px;
+            background: var(--ink-panel-strong);
+            color: var(--bronze-bright);
+            font-family: "Noto Serif SC", serif;
+            font-size: 0.66rem;
+            font-weight: 700;
+        }
+
+        .message-body {
+            min-width: 0;
+            padding: 12px 14px;
+            border: 1px solid var(--ink-line-soft);
+            border-radius: 4px;
+            background: rgba(26, 22, 18, 0.7);
+        }
+
+        .message-row.selected .message-body { border-color: var(--bronze-deep); }
+        .message-text { color: var(--cream); font-size: 0.86rem; line-height: 1.72; overflow-wrap: anywhere; }
+        .message-text p:first-child { margin-top: 0; }
+        .message-text p:last-child { margin-bottom: 0; }
+        .message-text pre { max-width: 100%; overflow-x: auto; padding: 11px; border: 1px solid var(--ink-line); background: var(--ink-deepest); border-radius: 3px; }
+        .message-text code { font-family: "JetBrains Mono", monospace; font-size: 0.82rem; }
+        .message-text pre code { color: var(--bronze-bright); }
+        .message-time { margin-top: 9px; color: var(--cream-dim); font-family: "JetBrains Mono", monospace; font-size: 0.62rem; }
+
+        .trace-track {
+            display: grid;
+            gap: 7px;
+            margin-bottom: 12px;
+            padding-bottom: 11px;
+            border-bottom: 1px solid var(--ink-line-soft);
+        }
+
+        .trace-row {
+            display: grid;
+            grid-template-columns: 10px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 8px;
+            color: var(--cream);
+            font-family: "JetBrains Mono", monospace;
+            font-size: 0.67rem;
+        }
+
+        .trace-row .trace-indicator { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--cream-muted); }
+        .trace-row.active .trace-indicator { border-color: var(--bronze); background: var(--bronze); box-shadow: 0 0 8px rgba(200, 149, 68, 0.6); }
+        .trace-row.done .trace-indicator { border-color: var(--jade-bright); background: var(--jade-bright); }
+        .trace-row.failed .trace-indicator { border-color: var(--vermillion-bright); background: var(--vermillion-bright); }
+        .trace-row .trace-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trace-row time { color: var(--cream-dim); font-size: 0.61rem; }
+
+        details.trace-detail {
+            margin: 0;
+            padding: 8px 9px;
+            border: 1px solid var(--ink-line-soft);
+            border-radius: 3px;
+            background: rgba(200, 149, 68, 0.02);
+        }
+
+        details.trace-detail summary { color: var(--cream); cursor: pointer; font-family: "JetBrains Mono", monospace; font-size: 0.67rem; }
+        .trace-data { margin: 8px 0 0; color: var(--cream-muted); font-family: "JetBrains Mono", monospace; font-size: 0.66rem; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+        .turn-summary { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+        .metric-chip { padding: 4px 6px; border: 1px solid var(--ink-line); color: var(--cream); font-family: "JetBrains Mono", monospace; font-size: 0.61rem; border-radius: 2px; }
+
+        .composer-wrap { padding: 13px clamp(16px, 4vw, 48px) 18px; border-top: 1px solid var(--ink-line-soft); background: rgba(15, 12, 10, 0.85); }
+        .composer { display: flex; align-items: flex-end; gap: 9px; max-width: 900px; margin: 0 auto; }
+        textarea { min-height: 44px; max-height: 146px; padding: 12px; resize: vertical; color: var(--cream); line-height: 1.45; border-radius: 3px; }
+        .send-btn { flex: 0 0 44px; height: 44px; padding: 0; }
+        .composer-note { max-width: 900px; margin: 7px auto 0; color: var(--cream-dim); font-family: "JetBrains Mono", monospace; font-size: 0.6rem; }
+
+        .inspector {
+            border-left: 1px solid var(--ink-line);
+            display: grid;
+            grid-template-rows: 58px minmax(0, 1fr);
+        }
+
+        .inspector-head { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--ink-line-soft); }
+        .inspector-head h2 { margin: 0; font-size: 0.85rem; font-weight: 600; color: var(--cream-bright); font-family: "Noto Serif SC", serif; letter-spacing: 2px; }
+        .inspector-scroll { padding: 13px 16px 28px; }
+
+        .observe-empty { padding: 46px 10px; color: var(--cream-muted); font-size: 0.75rem; line-height: 1.6; text-align: center; }
+        .inspect-section { padding: 13px 0; border-bottom: 1px solid var(--ink-line-soft); }
+        .inspect-section:last-child { border-bottom: 0; }
+        .inspect-section summary { display: flex; align-items: center; justify-content: space-between; color: var(--cream); cursor: pointer; font-family: "Noto Sans SC", sans-serif; font-size: 0.72rem; font-weight: 500; letter-spacing: 1px; list-style: none; }
+        .inspect-section summary::-webkit-details-marker { display: none; }
+        .inspect-section summary::after { content: "+"; color: var(--bronze); font-family: "JetBrains Mono", monospace; }
+        .inspect-section[open] summary::after { content: "-"; }
+        .inspect-content { padding-top: 12px; }
+
+        .kv-list { display: grid; gap: 8px; }
+        .kv-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 9px; align-items: start; font-family: "JetBrains Mono", monospace; font-size: 0.65rem; line-height: 1.45; }
+        .kv-key { color: var(--cream-muted); }
+        .kv-value { min-width: 0; color: var(--cream); overflow-wrap: anywhere; }
+        .copy-trace { width: 100%; margin-top: 10px; color: var(--cream); border-color: var(--ink-line); background: transparent; }
+
+        .resource-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-bottom: 12px; background: var(--ink-line); border: 1px solid var(--ink-line); border-radius: 3px; overflow: hidden; }
+        .resource-value { min-height: 65px; padding: 9px 7px; background: var(--ink-panel); }
+        .resource-value span, .resource-value strong { display: block; }
+        .resource-value span { color: var(--cream-muted); font-family: "JetBrains Mono", monospace; font-size: 0.57rem; }
+        .resource-value strong { margin-top: 8px; color: var(--bronze-bright); font-family: "JetBrains Mono", monospace; font-size: 0.77rem; font-weight: 500; }
+        .usage-bar { height: 5px; margin-top: 9px; overflow: hidden; background: var(--ink-deepest); border-radius: 2px; }
+        .usage-bar > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--bronze), var(--vermillion)); transition: width 180ms ease; }
+
+        .detail-block { margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--ink-line-soft); }
+        .detail-block:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+        .detail-title { margin-bottom: 6px; color: var(--cream-muted); font-family: "JetBrains Mono", monospace; font-size: 0.61rem; text-transform: uppercase; }
+        .detail-note { color: var(--cream); font-size: 0.7rem; line-height: 1.55; overflow-wrap: anywhere; }
+        .detail-block pre { max-height: 180px; margin: 8px 0 0; overflow: auto; padding: 9px; border: 1px solid var(--ink-line); background: var(--ink-deepest); color: var(--cream); font-family: "JetBrains Mono", monospace; font-size: 0.63rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 3px; }
+
+        .notice {
+            position: fixed;
+            z-index: 10;
+            right: 20px;
+            bottom: 20px;
+            max-width: min(360px, calc(100vw - 40px));
+            padding: 10px 12px;
+            border: 1px solid var(--ink-line);
+            border-left: 3px solid var(--bronze);
+            background: var(--ink-panel);
+            box-shadow: var(--shadow);
+            color: var(--cream);
+            font-size: 0.75rem;
+            border-radius: 2px;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(9px);
+            transition: opacity 160ms ease, transform 160ms ease;
+        }
+
+        .notice.show { opacity: 1; transform: translateY(0); }
+        .notice.error { border-left-color: var(--vermillion-bright); }
+
+        .error-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 20;
+            display: none;
+            place-items: center;
+            padding: 20px;
+            background: rgba(10, 8, 6, 0.78);
+        }
+
+        .error-overlay.active { display: grid; }
+        .error-dialog { width: min(410px, 100%); padding: 24px; border: 1px solid var(--vermillion); background: var(--ink-panel); box-shadow: var(--shadow); border-radius: 3px; }
+        .error-dialog h2 { margin: 0; font-size: 1rem; color: var(--vermillion-bright); font-family: "Noto Serif SC", serif; }
+        .error-dialog p { margin: 10px 0 18px; color: var(--cream-muted); font-family: "JetBrains Mono", monospace; font-size: 0.68rem; line-height: 1.7; overflow-wrap: anywhere; }
+
+        @media (max-width: 1160px) {
+            .workspace { grid-template-columns: 238px minmax(0, 1fr) 312px; }
+            .kv-row { grid-template-columns: 96px minmax(0, 1fr); }
+        }
+
+        @media (max-width: 920px) {
+            body { overflow: auto; }
+            .app-shell { height: auto; min-height: 100vh; grid-template-rows: 58px auto; }
+            .workspace { grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(620px, 1fr) auto; }
+            .inspector { grid-column: 1 / -1; min-height: 360px; border-top: 1px solid var(--ink-line); border-left: 0; }
+            .inspector-scroll { max-height: none; }
+        }
+
+        @media (max-width: 680px) {
+            .topbar { padding: 0 13px; }
+            .topbar-status { display: none; }
+            .workspace { display: block; }
+            .sidebar { min-height: auto; border-right: 0; border-bottom: 1px solid var(--ink-line); }
+            .sidebar-scroll { overflow: visible; }
+            .side-section { padding-top: 12px; }
+            .session-list { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 12px; }
+            .session-item { flex: 0 0 185px; }
+            .conversation { min-height: 68vh; }
+            .messages { padding: 18px 13px; }
+            .composer-wrap { padding: 11px 13px 15px; }
+            .message-row { margin-bottom: 15px; }
+            .message-body { padding: 10px 11px; }
+            .inspector { min-height: 330px; }
+        }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--ink-line); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--bronze-deep); }
+    </style>
+</head>
+<body>
+<div class="app-shell">
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark">铸</span>
+            <span class="brand-text">铸灵<small>ZHULING</small></span>
+        </div>
+        <div class="topbar-status"><span class="status-dot"></span><span id="connectionState">API READY</span></div>
+    </header>
+
+    <main class="workspace">
+        <aside class="sidebar" aria-label="会话导航">
+            <div class="sidebar-scroll">
+                <div class="user-strip">
+                    <span class="avatar" id="userAvatar">U</span>
+                    <div class="user-copy"><strong id="displayName">User</strong><span>SIMULATED SESSION</span></div>
+                    <button class="icon-btn" id="logoutBtn" title="退出登录" aria-label="退出登录"><i class="fa-solid fa-right-from-bracket"></i></button>
+                </div>
+
+                <section class="side-section">
+                    <div class="section-label"><span>对话目标</span><span id="targetCount">0</span></div>
+                    <select id="targetSelect" aria-label="选择对话目标"></select>
+                    <div class="target-status" id="targetStatus" data-state="idle">正在加载 Target</div>
+                    <button class="command-btn full" id="newChatBtn" type="button"><i class="fa-solid fa-plus"></i> 新建会话</button>
+                </section>
+
+                <section class="side-section sessions-heading">
+                    <div class="section-label"><span>会话列表</span><span id="sessionCount">0</span></div>
+                </section>
+                <div class="session-list" id="sessionList"></div>
+            </div>
+        </aside>
+
+        <section class="conversation" aria-label="对话工作区">
+            <header class="conversation-head">
+                <div class="conversation-title"><h1 id="conversationTitle">选择一个 Agent</h1><p id="conversationMeta">NO ACTIVE SESSION</p></div>
+                <div class="conversation-actions">
+                    <button class="icon-btn" id="refreshBtn" title="刷新会话" aria-label="刷新会话"><i class="fa-solid fa-rotate"></i></button>
+                </div>
+            </header>
+
+            <div class="messages" id="messagesArea"></div>
+
+            <div class="composer-wrap">
+                <div class="composer">
+                    <textarea id="messageInput" rows="1" placeholder="输入消息" aria-label="消息内容"></textarea>
+                    <button class="command-btn send-btn" id="sendBtn" type="button" title="发送消息" aria-label="发送消息"><i class="fa-solid fa-arrow-up"></i></button>
+                </div>
+                <div class="composer-note" id="composerNote">TARGET REQUIRED</div>
+            </div>
+        </section>
+
+        <aside class="inspector" aria-label="本轮观测">
+            <header class="inspector-head"><h2>本轮观测</h2><span class="section-label" id="inspectorState">IDLE</span></header>
+            <div class="inspector-scroll" id="inspectorContent"></div>
+        </aside>
+    </main>
+</div>
+
+<div class="notice" id="notice" role="status"></div>
+
+<div class="error-overlay" id="errorOverlay" role="alertdialog" aria-modal="true" aria-labelledby="errorTitle">
+    <div class="error-dialog">
+        <h2 id="errorTitle">服务连接失败</h2>
+        <p id="errorMessage"></p>
+        <button class="command-btn" id="retryBtn" type="button"><i class="fa-solid fa-rotate"></i> 重试</button>
+    </div>
+</div>
+
+<script src="js/config.js"></script>
+<script>
+    const SUCCESS_CODE = '00000';
+    const state = {
+        userId: null,
+        targets: [],
+        sessions: [],
+        sessionId: null,
+        activeTargetId: null,
+        activeTurn: null,
+        turnSequences: new Map(),
+        abortController: null,
+        isSending: false,
+        selectedMetadata: null
+    };
+
+    const elements = {
+        userAvatar: document.getElementById('userAvatar'),
+        displayName: document.getElementById('displayName'),
+        targetSelect: document.getElementById('targetSelect'),
+        targetStatus: document.getElementById('targetStatus'),
+        targetCount: document.getElementById('targetCount'),
+        sessionList: document.getElementById('sessionList'),
+        sessionCount: document.getElementById('sessionCount'),
+        conversationTitle: document.getElementById('conversationTitle'),
+        conversationMeta: document.getElementById('conversationMeta'),
+        messagesArea: document.getElementById('messagesArea'),
+        messageInput: document.getElementById('messageInput'),
+        sendBtn: document.getElementById('sendBtn'),
+        newChatBtn: document.getElementById('newChatBtn'),
+        composerNote: document.getElementById('composerNote'),
+        inspectorContent: document.getElementById('inspectorContent'),
+        inspectorState: document.getElementById('inspectorState'),
+        errorOverlay: document.getElementById('errorOverlay'),
+        errorMessage: document.getElementById('errorMessage'),
+        connectionState: document.getElementById('connectionState'),
+        notice: document.getElementById('notice')
+    };
+
+    function getCookie(name) {
+        const prefix = `; ${document.cookie}`;
+        const parts = prefix.split(`; ${name}=`);
+        return parts.length === 2 ? parts.pop().split(';').shift() : null;
+    }
+
+    function getLoginUser() {
+        const loginCookie = getCookie('ai_agent_login');
+        if (loginCookie) {
+            try {
+                return JSON.parse(loginCookie).user || null;
+            } catch (error) {
+                console.warn('Failed to parse login cookie', error);
+            }
+        }
+        return getCookie('username');
+    }
+
+    function requireLogin() {
+        const user = getLoginUser();
+        if (!user) {
+            window.location.href = 'login.html';
+            return false;
+        }
+        state.userId = user;
+        elements.displayName.textContent = user;
+        elements.userAvatar.textContent = user.slice(0, 1).toUpperCase();
+        return true;
+    }
+
+    function logout() {
+        document.cookie = 'ai_agent_login=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+        document.cookie = 'username=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+        document.cookie = 'loginStatus=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+        window.location.href = 'login.html';
+    }
+
+    function apiBase() {
+        return (window.APP_CONFIG && window.APP_CONFIG.API_BASE ? window.APP_CONFIG.API_BASE : 'http://127.0.0.1:8091').replace(/\/+$/, '');
+    }
+
+    function apiUrl(path, params) {
+        const url = new URL(`${apiBase()}${path}`);
+        if (params) {
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
+            });
+        }
+        return url.toString();
+    }
+
+    async function apiRequest(path, options = {}) {
+        const response = await fetch(apiUrl(path, options.params), {
+            method: options.method || 'GET',
+            headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+            body: options.body ? JSON.stringify(options.body) : undefined,
+            signal: options.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        if (!payload || payload.code !== SUCCESS_CODE) throw new Error(payload && payload.info ? payload.info : '接口返回异常');
+        return payload.data;
+    }
+
+    function createElement(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined && text !== null) node.textContent = String(text);
+        return node;
+    }
+
+    function clearNode(node) {
+        while (node.firstChild) node.removeChild(node.firstChild);
+    }
+
+    function formatTime(value) {
+        const date = value ? new Date(value) : new Date();
+        return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString();
+    }
+
+    function formatRelativeTime(value) {
+        const date = value ? new Date(value) : null;
+        if (!date || Number.isNaN(date.getTime())) return '未知时间';
+        const delta = Date.now() - date.getTime();
+        if (delta < 60000) return '刚刚';
+        if (delta < 3600000) return `${Math.floor(delta / 60000)} 分钟前`;
+        if (delta < 86400000) return `${Math.floor(delta / 3600000)} 小时前`;
+        return date.toLocaleDateString();
+    }
+
+    function formatValue(value, suffix = '') {
+        return value === undefined || value === null || value === '' ? 'N/A' : `${value}${suffix}`;
+    }
+
+    function formatDuration(value) {
+        if (value === undefined || value === null) return 'N/A';
+        if (value < 1000) return `${value} ms`;
+        return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s`;
+    }
+
+    function renderMarkdown(text) {
+        if (!text) return '';
+        if (!window.marked || !window.DOMPurify) return escapeHtml(text);
+        return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+    }
+
+    function escapeHtml(text) {
+        const node = document.createElement('div');
+        node.textContent = text || '';
+        return node.innerHTML;
+    }
+
+    function normalizeMetadata(metadata) {
+        if (!metadata) return {};
+        if (typeof metadata === 'object') return metadata;
+        try { return JSON.parse(metadata); } catch (error) { return {}; }
+    }
+
+    function showNotice(message, isError = false) {
+        elements.notice.textContent = message;
+        elements.notice.classList.toggle('error', isError);
+        elements.notice.classList.add('show');
+        window.clearTimeout(showNotice.timer);
+        showNotice.timer = window.setTimeout(() => elements.notice.classList.remove('show'), 3200);
+    }
+
+    function showConnectionError(error) {
+        elements.errorMessage.textContent = `${error.message || error} | API_BASE: ${apiBase()}`;
+        elements.errorOverlay.classList.add('active');
+        elements.connectionState.textContent = 'API UNAVAILABLE';
+    }
+
+    function hideConnectionError() {
+        elements.errorOverlay.classList.remove('active');
+        elements.connectionState.textContent = 'API READY';
+    }
+
+    function getTarget(targetId = state.activeTargetId) {
+        return state.targets.find(target => target.id === targetId) || null;
+    }
+
+    function isTargetAvailable(target) {
+        return target && String(target.status || '').toUpperCase() === 'AVAILABLE';
+    }
+
+    function targetDisplayName(targetId) {
+        const target = getTarget(targetId);
+        return target ? target.name : targetId || '未知 Target';
+    }
+
+    function renderTargets() {
+        clearNode(elements.targetSelect);
+        if (state.targets.length === 0) {
+            const option = createElement('option', '', '未发现可用 Target');
+            option.value = '';
+            elements.targetSelect.appendChild(option);
+        } else {
+            state.targets.forEach(target => {
+                const option = createElement('option', '', target.name || target.id);
+                option.value = target.id;
+                option.disabled = !isTargetAvailable(target);
+                elements.targetSelect.appendChild(option);
+            });
+        }
+        elements.targetCount.textContent = String(state.targets.length);
+        if (!state.activeTargetId && state.targets.length > 0) {
+            const available = state.targets.find(isTargetAvailable) || state.targets[0];
+            state.activeTargetId = available.id;
+        }
+        elements.targetSelect.value = state.activeTargetId || '';
+        renderTargetStatus();
+    }
+
+    function renderTargetStatus() {
+        const target = getTarget();
+        const available = isTargetAvailable(target);
+        elements.targetStatus.dataset.state = !target ? 'idle' : available ? 'available' : 'unavailable';
+        if (!target) {
+            elements.targetStatus.textContent = '请选择 Target';
+        } else if (available) {
+            elements.targetStatus.textContent = target.description || 'AVAILABLE';
+        } else {
+            elements.targetStatus.textContent = target.unavailableReason || 'Target 不可用';
+        }
+        elements.newChatBtn.disabled = !available || state.isSending;
+        renderConversationHeading();
+    }
+
+    function renderConversationHeading() {
+        const target = getTarget();
+        const session = state.sessions.find(item => item.id === state.sessionId);
+        elements.conversationTitle.textContent = session ? session.title : target ? target.name : '选择一个 Agent';
+        if (state.activeTurn) {
+            elements.conversationMeta.textContent = `LIVE ${state.activeTurn.id.slice(0, 16)}`;
+        } else if (session) {
+            elements.conversationMeta.textContent = `${targetDisplayName(session.targetId)} · ${formatRelativeTime(session.updatedAt)}`;
+        } else {
+            elements.conversationMeta.textContent = target && isTargetAvailable(target) ? 'NEW SESSION' : 'NO ACTIVE SESSION';
+        }
+        elements.composerNote.textContent = target && isTargetAvailable(target)
+            ? state.isSending ? 'STREAMING' : state.sessionId ? `SESSION ${state.sessionId.slice(0, 12)}` : 'NEW SESSION ON SEND'
+            : 'TARGET REQUIRED';
+    }
+
+    function renderSessions() {
+        clearNode(elements.sessionList);
+        elements.sessionCount.textContent = String(state.sessions.length);
+        if (state.sessions.length === 0) {
+            elements.sessionList.appendChild(createElement('div', 'empty-list', '暂无会话'));
+            return;
+        }
+        state.sessions.forEach(session => {
+            const item = createElement('div', `session-item${session.id === state.sessionId ? ' active' : ''}`);
+            item.setAttribute('role', 'button');
+            item.tabIndex = 0;
+            item.dataset.sessionId = session.id;
+            const copy = createElement('div');
+            copy.appendChild(createElement('div', 'session-title', session.title || '新对话'));
+            copy.appendChild(createElement('div', 'session-meta', `${targetDisplayName(session.targetId)} · ${formatRelativeTime(session.updatedAt)}`));
+            item.appendChild(copy);
+            const close = createElement('button', 'icon-btn session-close');
+            close.type = 'button';
+            close.title = '关闭会话';
+            close.setAttribute('aria-label', '关闭会话');
+            close.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            close.addEventListener('click', event => {
+                event.stopPropagation();
+                closeSession(session.id);
+            });
+            item.appendChild(close);
+            item.addEventListener('click', () => switchSession(session.id));
+            item.addEventListener('keydown', event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    switchSession(session.id);
+                }
+            });
+            elements.sessionList.appendChild(item);
+        });
+    }
+
+    async function loadTargets() {
+        const targets = await apiRequest('/api/v1/chat-targets');
+        state.targets = Array.isArray(targets) ? targets : [];
+        renderTargets();
+    }
+
+    async function loadSessions() {
+        if (!state.userId) return;
+        const page = await apiRequest('/api/v1/session', {
+            params: { userId: state.userId, page: 1, pageSize: 50 }
+        });
+        state.sessions = page && Array.isArray(page.items) ? page.items : [];
+        renderSessions();
+        renderConversationHeading();
+    }
+
+    async function loadSessionMessages(sessionId) {
+        const messages = await apiRequest(`/api/v1/session/${encodeURIComponent(sessionId)}/messages`);
+        clearNode(elements.messagesArea);
+        const items = Array.isArray(messages) ? messages : [];
+        if (items.length === 0) {
+            renderWelcome();
+        } else {
+            items.forEach(message => renderPersistedMessage(message));
+            const lastAssistant = [...items].reverse().find(item => item.role === 'assistant');
+            if (lastAssistant) selectMetadata(normalizeMetadata(lastAssistant.metadata), null);
+            else renderInspector(null);
+        }
+        scrollMessages();
+    }
+
+    function renderWelcome() {
+        const target = getTarget();
+        const container = createElement('div', 'welcome');
+        const mark = createElement('div', 'welcome-mark');
+        mark.textContent = '铸';
+        container.appendChild(mark);
+        container.appendChild(createElement('h2', '', target ? target.name : '铸灵'));
+        container.appendChild(createElement('p', '', target ? (target.description || '开始一轮新的对话。') : '选择一个可用 Target 后开始对话。'));
+        elements.messagesArea.appendChild(container);
+    }
+
+    function renderPersistedMessage(message) {
+        const metadata = normalizeMetadata(message.metadata);
+        if (message.role === 'assistant') {
+            return createAssistantMessage(message.content || '', message.createdAt, metadata, false);
+        }
+        return createUserMessage(message.content || '', message.createdAt);
+    }
+
+    function createUserMessage(content, createdAt) {
+        const row = createElement('article', 'message-row user');
+        const avatar = createElement('div', 'message-avatar', 'ME');
+        const body = createElement('div', 'message-body');
+        body.appendChild(createElement('div', 'message-text', content));
+        body.appendChild(createElement('div', 'message-time', formatTime(createdAt)));
+        row.appendChild(avatar);
+        row.appendChild(body);
+        elements.messagesArea.appendChild(row);
+        return row;
+    }
+
+    function createAssistantMessage(content, createdAt, metadata = {}, isLive = false) {
+        const row = createElement('article', 'message-row assistant');
+        const avatar = createElement('div', 'message-avatar', '灵');
+        const body = createElement('div', 'message-body');
+        const track = createElement('div', 'trace-track');
+        const text = createElement('div', 'message-text');
+        const time = createElement('div', 'message-time', formatTime(createdAt));
+
+        body.appendChild(track);
+        body.appendChild(text);
+        body.appendChild(time);
+        row.appendChild(avatar);
+        row.appendChild(body);
+        elements.messagesArea.appendChild(row);
+
+        const view = { row, body, track, text, time, metadata, content: content || '', toolRows: [], reasoningNode: null, summary: null, isLive };
+        if (isLive) {
+            appendTraceRow(view, 'active', '请求模型', '已开始');
+            text.textContent = '';
+        } else {
+            hydrateAssistantView(view, metadata);
+            text.innerHTML = renderMarkdown(view.content);
+        }
+        row.addEventListener('click', () => selectMetadata(view.metadata, row));
+        return view;
+    }
+
+    function appendTraceRow(view, stateName, label, detail) {
+        const row = createElement('div', `trace-row ${stateName}`);
+        row.appendChild(createElement('span', 'trace-indicator'));
+        row.appendChild(createElement('span', 'trace-detail', `${label}${detail ? ` · ${detail}` : ''}`));
+        row.appendChild(createElement('time', '', formatTime()));
+        view.track.appendChild(row);
+        return row;
+    }
+
+    function appendReasoning(view, text, status, note) {
+        if (!view.reasoningNode) {
+            const detail = document.createElement('details');
+            detail.className = 'trace-detail';
+            const summary = createElement('summary', '', status ? `推理 · ${status}` : '推理');
+            const content = createElement('div', 'trace-data');
+            detail.appendChild(summary);
+            detail.appendChild(content);
+            view.track.appendChild(detail);
+            view.reasoningNode = { detail, summary, content };
+        }
+        if (status) view.reasoningNode.summary.textContent = `推理 · ${status}`;
+        view.reasoningNode.content.textContent += text || note || '';
+    }
+
+    function appendToolStarted(view, payload) {
+        const detail = document.createElement('details');
+        detail.className = 'trace-detail';
+        const summary = createElement('summary', '', `工具 · ${payload.toolName || 'unknown'} · 运行中`);
+        const content = createElement('div', 'trace-data');
+        content.textContent = payload.inputPreview || '无输入预览';
+        detail.appendChild(summary);
+        detail.appendChild(content);
+        view.track.appendChild(detail);
+        const tool = { name: payload.toolName, detail, summary, content, completed: false };
+        view.toolRows.push(tool);
+        return tool;
+    }
+
+    function appendToolCompleted(view, payload) {
+        const tool = [...view.toolRows].reverse().find(item => !item.completed && item.name === payload.toolName)
+            || appendToolStarted(view, payload);
+        tool.completed = true;
+        tool.summary.textContent = `工具 · ${payload.toolName || 'unknown'} · ${payload.success === false ? '失败' : '完成'}`;
+        const output = payload.success === false ? (payload.error || payload.errorType || '工具执行失败') : (payload.outputPreview || '无输出预览');
+        tool.content.textContent = output;
+        appendTraceRow(view, payload.success === false ? 'failed' : 'done', '工具调用', formatDuration(payload.durationMs));
+    }
+
+    function hydrateAssistantView(view, metadata) {
+        const reasoning = metadata.reasoning || {};
+        const tools = Array.isArray(metadata.toolCalls) ? metadata.toolCalls : [];
+        const timing = metadata.timing || {};
+        if (reasoning.content) appendReasoning(view, reasoning.content, reasoning.status, reasoning.note);
+        else if (reasoning.status || reasoning.note) appendTraceRow(view, 'done', '推理', reasoning.status || reasoning.note);
+        tools.forEach(tool => {
+            appendToolStarted(view, tool);
+            appendToolCompleted(view, tool);
+        });
+        appendTraceRow(view, metadata.status === 'error' ? 'failed' : 'done', metadata.status === 'error' ? '执行失败' : '执行完成', formatDuration(timing.durationMs));
+        appendTurnSummary(view, metadata);
+    }
+
+    function appendTurnSummary(view, metadata) {
+        if (view.summary) view.summary.remove();
+        const usage = metadata.usage || {};
+        const context = metadata.context || {};
+        const timing = metadata.timing || {};
+        const chips = [
+            usage.totalTokens !== undefined && usage.totalTokens !== null ? `${usage.totalTokens} tokens` : null,
+            Array.isArray(metadata.toolCalls) ? `${metadata.toolCalls.length} tools` : null,
+            timing.durationMs !== undefined && timing.durationMs !== null ? formatDuration(timing.durationMs) : null,
+            context.contextUtilizationRatio !== undefined && context.contextUtilizationRatio !== null
+                ? `${Math.round(Number(context.contextUtilizationRatio) * 100)}% context` : null
+        ].filter(Boolean);
+        if (chips.length === 0) return;
+        const summary = createElement('div', 'turn-summary');
+        chips.forEach(chip => summary.appendChild(createElement('span', 'metric-chip', chip)));
+        view.track.appendChild(summary);
+        view.summary = summary;
+    }
+
+    function scrollMessages() {
+        elements.messagesArea.scrollTop = elements.messagesArea.scrollHeight;
+    }
+
+    function addInspectorSection(title, builder, open = true) {
+        const details = document.createElement('details');
+        details.className = 'inspect-section';
+        details.open = open;
+        details.appendChild(createElement('summary', '', title));
+        const content = createElement('div', 'inspect-content');
+        builder(content);
+        details.appendChild(content);
+        elements.inspectorContent.appendChild(details);
+    }
+
+    function appendKeyValues(container, pairs) {
+        const list = createElement('div', 'kv-list');
+        pairs.forEach(([key, value]) => {
+            const row = createElement('div', 'kv-row');
+            row.appendChild(createElement('span', 'kv-key', key));
+            row.appendChild(createElement('span', 'kv-value', formatValue(value)));
+            list.appendChild(row);
+        });
+        container.appendChild(list);
+    }
+
+    function renderInspector(metadata) {
+        clearNode(elements.inspectorContent);
+        if (!metadata || Object.keys(metadata).length === 0) {
+            elements.inspectorContent.appendChild(createElement('div', 'observe-empty', '选择一条助手消息后显示本轮观测。'));
+            elements.inspectorState.textContent = 'IDLE';
+            return;
+        }
+
+        const model = metadata.model || {};
+        const trace = metadata.trace || {};
+        const timing = metadata.timing || {};
+        const usage = metadata.usage || {};
+        const context = metadata.context || {};
+        const reasoning = metadata.reasoning || {};
+        const tools = Array.isArray(metadata.toolCalls) ? metadata.toolCalls : [];
+        const status = metadata.status || 'running';
+        elements.inspectorState.textContent = String(status).toUpperCase();
+
+        addInspectorSection('运行摘要', container => {
+            appendKeyValues(container, [
+                ['Target', metadata.targetId || metadata.agentId],
+                ['Model', model.name],
+                ['Trace ID', trace.traceId],
+                ['Request ID', trace.requestId],
+                ['Turn ID', trace.turnId],
+                ['Status', status],
+                ['Duration', formatDuration(timing.durationMs)]
+            ]);
+            if (trace.traceId) {
+                const copyButton = createElement('button', 'command-btn copy-trace');
+                copyButton.type = 'button';
+                copyButton.innerHTML = '<i class="fa-regular fa-copy"></i> 复制 Trace ID';
+                copyButton.addEventListener('click', async event => {
+                    event.stopPropagation();
+                    try {
+                        await navigator.clipboard.writeText(trace.traceId);
+                        showNotice('Trace ID 已复制');
+                    } catch (error) {
+                        showNotice('浏览器不允许复制', true);
+                    }
+                });
+                container.appendChild(copyButton);
+            }
+        });
+
+        addInspectorSection('资源用量', container => {
+            const grid = createElement('div', 'resource-grid');
+            [['Prompt', usage.promptTokens], ['Completion', usage.completionTokens], ['Total', usage.totalTokens]].forEach(([name, value]) => {
+                const cell = createElement('div', 'resource-value');
+                cell.appendChild(createElement('span', '', name));
+                cell.appendChild(createElement('strong', '', formatValue(value)));
+                grid.appendChild(cell);
+            });
+            container.appendChild(grid);
+            appendKeyValues(container, [
+                ['Available messages', context.availableMessageCount],
+                ['Included messages', context.includedMessageCount],
+                ['Estimated prompt', context.estimatedPromptTokens],
+                ['Context window', context.contextWindowTokens]
+            ]);
+            const ratio = Number(context.contextUtilizationRatio);
+            const validRatio = Number.isFinite(ratio) && ratio >= 0;
+            const bar = createElement('div', 'usage-bar');
+            const fill = createElement('span');
+            fill.style.width = validRatio ? `${Math.min(100, ratio * 100)}%` : '0%';
+            bar.appendChild(fill);
+            container.appendChild(bar);
+            container.appendChild(createElement('div', 'detail-note', validRatio ? `Context utilization: ${(ratio * 100).toFixed(1)}%` : 'Context utilization: N/A'));
+        });
+
+        addInspectorSection('调用明细', container => {
+            const reasoningBlock = createElement('div', 'detail-block');
+            reasoningBlock.appendChild(createElement('div', 'detail-title', `Reasoning · ${formatValue(reasoning.status)}`));
+            reasoningBlock.appendChild(createElement('div', 'detail-note', reasoning.note || (reasoning.content ? '' : '供应商未返回 reasoning 内容。')));
+            if (reasoning.content) {
+                const pre = createElement('pre', '', reasoning.content);
+                reasoningBlock.appendChild(pre);
+            }
+            container.appendChild(reasoningBlock);
+
+            if (tools.length === 0) {
+                const toolBlock = createElement('div', 'detail-block');
+                toolBlock.appendChild(createElement('div', 'detail-title', 'Tools'));
+                toolBlock.appendChild(createElement('div', 'detail-note', '本轮未采集工具调用。'));
+                container.appendChild(toolBlock);
+            } else {
+                tools.forEach((tool, index) => {
+                    const block = createElement('div', 'detail-block');
+                    block.appendChild(createElement('div', 'detail-title', `${index + 1}. ${tool.toolName || 'unknown'} · ${tool.success === false ? 'FAILED' : 'DONE'}`));
+                    block.appendChild(createElement('div', 'detail-note', `${formatValue(tool.toolType)} · ${formatDuration(tool.durationMs)}`));
+                    if (tool.inputPreview) block.appendChild(createElement('pre', '', tool.inputPreview));
+                    if (tool.outputPreview || tool.errorMessage) block.appendChild(createElement('pre', '', tool.outputPreview || tool.errorMessage));
+                    container.appendChild(block);
+                });
+            }
+            if (metadata.error) {
+                const error = typeof metadata.error === 'object' ? metadata.error : { message: metadata.error };
+                const block = createElement('div', 'detail-block');
+                block.appendChild(createElement('div', 'detail-title', 'Error'));
+                block.appendChild(createElement('div', 'detail-note', error.message || error.type || String(metadata.error)));
+                container.appendChild(block);
+            }
+        }, false);
+    }
+
+    function selectMetadata(metadata, selectedRow) {
+        state.selectedMetadata = metadata;
+        document.querySelectorAll('.message-row.selected').forEach(row => row.classList.remove('selected'));
+        if (selectedRow) selectedRow.classList.add('selected');
+        renderInspector(metadata);
+    }
+
+    function parseSseEvent(raw) {
+        const lines = raw.split(/\r?\n/);
+        let type = 'message';
+        const dataLines = [];
+        lines.forEach(line => {
+            if (line.startsWith('event:')) type = line.slice(6).trim();
+            if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+        });
+        if (dataLines.length === 0) return null;
+        try {
+            return { type, data: JSON.parse(dataLines.join('\n')) };
+        } catch (error) {
+            console.warn('Invalid SSE data', error);
+            return null;
+        }
+    }
+
+    function createSseParser(onEvent) {
+        let buffer = '';
+        function consume(finalChunk) {
+            while (true) {
+                const separator = buffer.search(/\r?\n\r?\n/);
+                if (separator < 0) break;
+                const raw = buffer.slice(0, separator);
+                const boundary = buffer.match(/\r?\n\r?\n/);
+                buffer = buffer.slice(separator + boundary[0].length);
+                const event = parseSseEvent(raw);
+                if (event) onEvent(event);
+            }
+            if (finalChunk && buffer.trim()) {
+                const event = parseSseEvent(buffer);
+                buffer = '';
+                if (event) onEvent(event);
+            }
+        }
+        return {
+            feed(chunk) { buffer += chunk; consume(false); },
+            finish() { consume(true); }
+        };
+    }
+
+    function acceptEvent(event) {
+        const data = event.data;
+        if (!data || !data.turnId || !Number.isFinite(Number(data.sequence))) return false;
+        if (data.sessionId !== state.sessionId) return false;
+        const sequence = Number(data.sequence);
+        const lastSequence = state.turnSequences.get(data.turnId) || 0;
+        if (sequence <= lastSequence) return false;
+        state.turnSequences.set(data.turnId, sequence);
+        return true;
+    }
+
+    function startLiveTurn(event) {
+        const payload = event.data.payload || {};
+        const metadata = {
+            targetId: payload.target && payload.target.id,
+            agentId: payload.agentId,
+            model: { name: payload.model },
+            trace: { traceId: payload.traceId, requestId: payload.requestId, turnId: event.data.turnId },
+            context: payload.context || {},
+            usage: {},
+            reasoning: {},
+            toolCalls: [],
+            status: 'running'
+        };
+        const view = createAssistantMessage('', event.data.timestamp, metadata, true);
+        state.activeTurn = { id: event.data.turnId, view, metadata, terminal: false };
+        selectMetadata(metadata, view.row);
+        renderConversationHeading();
+        scrollMessages();
+    }
+
+    function handleStreamEvent(event) {
+        if (!acceptEvent(event)) return;
+        const data = event.data;
+        const payload = data.payload || {};
+        if (data.type === 'turn.started') {
+            startLiveTurn(event);
+            return;
+        }
+        const turn = state.activeTurn;
+        if (!turn || turn.id !== data.turnId) return;
+
+        if (data.type === 'message.delta') {
+            turn.view.content += payload.text || '';
+            turn.view.text.textContent = turn.view.content;
+        } else if (data.type === 'reasoning.delta') {
+            turn.metadata.reasoning = {
+                status: payload.status,
+                note: payload.note,
+                content: `${turn.metadata.reasoning.content || ''}${payload.text || ''}`
+            };
+            appendReasoning(turn.view, payload.text, payload.status, payload.note);
+        } else if (data.type === 'tool.started') {
+            turn.metadata.toolCalls.push({
+                toolName: payload.toolName,
+                toolType: payload.toolType,
+                serverName: payload.serverName,
+                inputPreview: payload.inputPreview
+            });
+            appendToolStarted(turn.view, payload);
+        } else if (data.type === 'tool.completed') {
+            const tool = [...turn.metadata.toolCalls].reverse().find(item => !item.completed && item.toolName === payload.toolName);
+            if (tool) Object.assign(tool, payload, { completed: true });
+            else turn.metadata.toolCalls.push({ ...payload, completed: true });
+            appendToolCompleted(turn.view, payload);
+        } else if (data.type === 'turn.completed' || data.type === 'turn.failed') {
+            finalizeLiveTurn(turn, payload, data.type === 'turn.failed');
+        }
+        selectMetadata(turn.metadata, turn.view.row);
+        scrollMessages();
+    }
+
+    function finalizeLiveTurn(turn, payload, failed) {
+        if (turn.terminal) return;
+        turn.terminal = true;
+        const metadata = payload.metadata || payload.partialMetadata || turn.metadata;
+        if (failed) {
+            metadata.status = 'error';
+            metadata.error = payload.error || metadata.error;
+        }
+        turn.metadata = metadata;
+        turn.view.metadata = metadata;
+        turn.view.text.innerHTML = renderMarkdown(turn.view.content);
+        appendTraceRow(turn.view, failed ? 'failed' : 'done', failed ? '执行失败' : '执行完成', formatDuration((metadata.timing || {}).durationMs));
+        appendTurnSummary(turn.view, metadata);
+        state.selectedMetadata = metadata;
+        state.activeTurn = null;
+        renderConversationHeading();
+    }
+
+    async function streamChat(sessionId, message) {
+        if (state.abortController) state.abortController.abort();
+        state.abortController = new AbortController();
+        const response = await fetch(apiUrl('/api/v1/chat/stream'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId, message }),
+            signal: state.abortController.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.body) throw new Error('浏览器未提供流式响应主体');
+
+        const parser = createSseParser(handleStreamEvent);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            parser.feed(decoder.decode(value, { stream: true }));
+        }
+        parser.feed(decoder.decode());
+        parser.finish();
+    }
+
+    async function createSession(title) {
+        const target = getTarget();
+        if (!isTargetAvailable(target)) throw new Error('请选择可用 Target');
+        const sessionId = await apiRequest('/api/v1/session/create', {
+            method: 'POST',
+            body: { targetId: target.id, targetType: target.type || 'AGENT', userId: state.userId, title }
+        });
+        state.sessionId = sessionId;
+        await loadSessions();
+        renderConversationHeading();
+        return sessionId;
+    }
+
+    async function sendMessage() {
+        const message = elements.messageInput.value.trim();
+        if (!message || state.isSending) return;
+        const target = getTarget();
+        if (!isTargetAvailable(target)) {
+            showNotice('请选择可用 Target', true);
+            return;
+        }
+
+        try {
+            state.isSending = true;
+            elements.sendBtn.disabled = true;
+            renderTargetStatus();
+            if (!state.sessionId) await createSession(message.slice(0, 30));
+            createUserMessage(message, new Date().toISOString());
+            elements.messageInput.value = '';
+            resizeTextarea();
+            scrollMessages();
+            await streamChat(state.sessionId, message);
+            if (state.activeTurn && !state.activeTurn.terminal) {
+                appendTraceRow(state.activeTurn.view, 'failed', '流已关闭', '未收到终态事件');
+                state.activeTurn.metadata.status = 'error';
+                state.activeTurn.metadata.error = { message: '流在终态事件前关闭' };
+                finalizeLiveTurn(state.activeTurn, { partialMetadata: state.activeTurn.metadata, error: state.activeTurn.metadata.error }, true);
+            }
+            await Promise.all([loadSessions(), loadSessionMessages(state.sessionId)]);
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error('Stream chat failed', error);
+                showNotice(`对话失败: ${error.message}`, true);
+                if (!state.activeTurn) {
+                    const view = createAssistantMessage('', new Date().toISOString(), {}, true);
+                    view.text.textContent = '请求未能建立。';
+                    appendTraceRow(view, 'failed', '请求失败', error.message);
+                }
+            }
+        } finally {
+            state.abortController = null;
+            state.isSending = false;
+            elements.sendBtn.disabled = false;
+            renderTargetStatus();
+            elements.messageInput.focus();
+        }
+    }
+
+    async function switchSession(sessionId) {
+        if (sessionId === state.sessionId) return;
+        if (state.abortController) state.abortController.abort();
+        const session = state.sessions.find(item => item.id === sessionId);
+        if (!session) return;
+        state.sessionId = sessionId;
+        state.activeTargetId = session.targetId;
+        state.activeTurn = null;
+        state.turnSequences.clear();
+        elements.targetSelect.value = session.targetId;
+        renderTargetStatus();
+        renderSessions();
+        renderInspector(null);
+        try {
+            await loadSessionMessages(sessionId);
+        } catch (error) {
+            showNotice(`加载会话失败: ${error.message}`, true);
+        }
+    }
+
+    async function closeSession(sessionId) {
+        if (!window.confirm('关闭此会话？')) return;
+        try {
+            await apiRequest(`/api/v1/session/${encodeURIComponent(sessionId)}/close`, { method: 'POST' });
+            if (state.sessionId === sessionId) resetConversation();
+            await loadSessions();
+        } catch (error) {
+            showNotice(`关闭会话失败: ${error.message}`, true);
+        }
+    }
+
+    function resetConversation() {
+        if (state.abortController) state.abortController.abort();
+        state.sessionId = null;
+        state.activeTurn = null;
+        state.turnSequences.clear();
+        clearNode(elements.messagesArea);
+        renderWelcome();
+        renderInspector(null);
+        renderSessions();
+        renderConversationHeading();
+    }
+
+    function resizeTextarea() {
+        elements.messageInput.style.height = 'auto';
+        elements.messageInput.style.height = `${Math.min(elements.messageInput.scrollHeight, 146)}px`;
+    }
+
+    async function refreshWorkspace() {
+        try {
+            await Promise.all([loadTargets(), loadSessions()]);
+            if (state.sessionId) await loadSessionMessages(state.sessionId);
+            hideConnectionError();
+        } catch (error) {
+            console.error('Workspace refresh failed', error);
+            showConnectionError(error);
+        }
+    }
+
+    elements.targetSelect.addEventListener('change', () => {
+        if (state.abortController) state.abortController.abort();
+        state.activeTargetId = elements.targetSelect.value || null;
+        resetConversation();
+    });
+    elements.newChatBtn.addEventListener('click', resetConversation);
+    elements.sendBtn.addEventListener('click', sendMessage);
+    elements.messageInput.addEventListener('input', resizeTextarea);
+    elements.messageInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
+        }
+    });
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+    document.getElementById('refreshBtn').addEventListener('click', refreshWorkspace);
+    document.getElementById('retryBtn').addEventListener('click', refreshWorkspace);
+
+    async function init() {
+        if (!requireLogin()) return;
+        renderWelcome();
+        renderInspector(null);
+        await refreshWorkspace();
+        elements.messageInput.focus();
+    }
+
+    init();
+</script>
+</body>
+</html>

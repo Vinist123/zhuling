@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>铸灵 ZhuLing · 铸造 AI 灵魂</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --ink-deepest: #0f0c0a;
+            --ink-deep: #14110e;
+            --ink-base: #1a1612;
+            --ink-panel: #221d18;
+            --ink-surface: rgba(34, 29, 24, 0.65);
+            --ink-border: rgba(200, 149, 68, 0.18);
+
+            --bronze: #c89544;
+            --bronze-bright: #e0b560;
+            --bronze-deep: #8a6420;
+            --bronze-glow: rgba(200, 149, 68, 0.4);
+
+            --vermillion: #c54225;
+            --vermillion-bright: #e85a3a;
+            --vermillion-glow: rgba(197, 66, 37, 0.35);
+
+            --jade: #5a8a6b;
+
+            --cream: #e8dcc8;
+            --cream-bright: #f5edd9;
+            --cream-muted: #a89a85;
+            --cream-dim: #6b6358;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: var(--ink-deepest);
+            color: var(--cream);
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 墨韵背景 */
+        .bg-ink {
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 80% 60% at 20% 30%, rgba(200, 149, 68, 0.1), transparent 60%),
+                radial-gradient(ellipse 70% 50% at 80% 70%, rgba(197, 66, 37, 0.08), transparent 60%),
+                radial-gradient(ellipse 60% 80% at 50% 50%, rgba(34, 29, 24, 0.4), transparent 70%),
+                var(--ink-deepest);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .bg-noise {
+            position: fixed;
+            inset: 0;
+            opacity: 0.015;
+            pointer-events: none;
+            z-index: 1;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E");
+        }
+
+        /* 暖光晕 */
+        .glow-orb {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(90px);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .orb-1 {
+            width: 900px;
+            height: 900px;
+            background: radial-gradient(circle, rgba(200, 149, 68, 0.35), transparent 70%);
+            top: -300px;
+            left: -300px;
+            animation: float 18s ease-in-out infinite;
+        }
+
+        .orb-2 {
+            width: 1000px;
+            height: 1000px;
+            background: radial-gradient(circle, rgba(197, 66, 37, 0.25), transparent 70%);
+            bottom: -350px;
+            right: -350px;
+            animation: float 24s ease-in-out infinite reverse;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(25px, -25px); }
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* 左侧面板 */
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 60px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* 装饰角线 */
+        .corner-deco {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-color: rgba(200, 149, 68, 0.3);
+            border-style: solid;
+        }
+        .corner-deco.tl { top: 28px; left: 28px; border-width: 1px 0 0 1px; }
+        .corner-deco.tr { top: 28px; right: 28px; border-width: 1px 1px 0 0; }
+        .corner-deco.bl { bottom: 28px; left: 28px; border-width: 0 0 1px 1px; }
+        .corner-deco.br { bottom: 28px; right: 28px; border-width: 0 1px 1px 0; }
+
+        /* 炉心动画 */
+        .forge-core {
+            width: 280px;
+            height: 280px;
+            position: relative;
+            margin-bottom: 40px;
+        }
+
+        .forge-ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 1px solid;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .forge-ring:nth-child(1) {
+            width: 100%;
+            height: 100%;
+            border-color: var(--bronze);
+            border-style: dashed;
+            box-shadow: 0 0 30px var(--bronze-glow), inset 0 0 30px rgba(200, 149, 68, 0.15);
+            animation: spin 25s linear infinite;
+        }
+
+        .forge-ring:nth-child(2) {
+            width: 75%;
+            height: 75%;
+            border-color: var(--vermillion);
+            border-style: dashed;
+            box-shadow: 0 0 25px var(--vermillion-glow), inset 0 0 25px rgba(197, 66, 37, 0.12);
+            animation: spin 18s linear infinite reverse;
+        }
+
+        .forge-ring:nth-child(3) {
+            width: 50%;
+            height: 50%;
+            border-color: var(--bronze-bright);
+            border-style: solid;
+            border-width: 1px;
+            box-shadow: 0 0 25px rgba(224, 181, 96, 0.5), inset 0 0 20px rgba(224, 181, 96, 0.15);
+            animation: spin 12s linear infinite;
+        }
+
+        .forge-ember {
+            position: absolute;
+            width: 64px;
+            height: 64px;
+            background: radial-gradient(circle, #fffaed, var(--bronze-bright) 25%, var(--vermillion) 65%);
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow:
+                0 0 60px var(--bronze),
+                0 0 120px var(--vermillion),
+                0 0 180px rgba(200, 149, 68, 0.4),
+                0 0 250px rgba(197, 66, 37, 0.2);
+            animation: core-pulse 2.5s ease-in-out infinite;
+        }
+
+        .forge-ember::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: inherit;
+            animation: ripple 2s ease-out infinite;
+        }
+
+        /* 八卦装饰点 */
+        .forge-ring:nth-child(1)::after {
+            content: '';
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--bronze-bright);
+            top: -3px;
+            left: 50%;
+            transform: translateX(-50%);
+            box-shadow: 0 0 16px var(--bronze), 0 0 30px var(--bronze-glow);
+        }
+
+        @keyframes spin {
+            from { transform: translate(-50%, -50%) rotate(0deg); }
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        @keyframes core-pulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.12); }
+        }
+
+        @keyframes ripple {
+            0% { transform: scale(1); opacity: 0.7; }
+            100% { transform: scale(3.2); opacity: 0; }
+        }
+
+        .left-content {
+            text-align: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        .brand-cn {
+            font-family: 'Ma Shan Zheng', serif;
+            font-size: 4.5rem;
+            font-weight: 400;
+            background: linear-gradient(135deg, var(--bronze-bright), var(--bronze), var(--vermillion));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+            letter-spacing: 12px;
+            padding-left: 12px;
+            filter: drop-shadow(0 0 30px rgba(200, 149, 68, 0.4));
+        }
+
+        .brand-en {
+            font-family: 'Noto Serif SC', serif;
+            font-size: 1rem;
+            font-weight: 400;
+            color: var(--cream-muted);
+            letter-spacing: 8px;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+        }
+
+        .tagline {
+            font-family: 'Noto Serif SC', serif;
+            font-size: 1.1rem;
+            color: var(--cream);
+            margin-bottom: 30px;
+            letter-spacing: 4px;
+            opacity: 0.8;
+        }
+
+        .tagline::before,
+        .tagline::after {
+            content: '—';
+            color: var(--bronze-deep);
+            margin: 0 12px;
+        }
+
+        .tech-badges {
+            display: flex;
+            gap: 14px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+
+        .badge {
+            padding: 8px 18px;
+            background: rgba(200, 149, 68, 0.06);
+            border: 1px solid rgba(200, 149, 68, 0.2);
+            border-radius: 2px;
+            font-size: 0.82rem;
+            color: var(--cream);
+            letter-spacing: 2px;
+            backdrop-filter: blur(8px);
+            transition: all 0.3s;
+            cursor: default;
+            font-family: 'Noto Sans SC', sans-serif;
+            font-weight: 400;
+        }
+
+        .badge:hover {
+            border-color: var(--bronze);
+            color: var(--bronze-bright);
+            box-shadow: 0 0 15px rgba(200, 149, 68, 0.15);
+            transform: translateY(-2px);
+        }
+
+        /* 右侧面板 */
+        .right-panel {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            position: relative;
+        }
+
+        .login-box {
+            background: var(--ink-surface);
+            backdrop-filter: blur(20px) saturate(130%);
+            border: 1px solid var(--ink-border);
+            border-radius: 4px;
+            padding: 50px 40px;
+            width: 100%;
+            max-width: 420px;
+            position: relative;
+            overflow: hidden;
+            box-shadow:
+                0 24px 80px rgba(0, 0, 0, 0.5),
+                0 0 0 1px rgba(200, 149, 68, 0.04) inset;
+        }
+
+        /* 顶部装饰线 */
+        .login-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--bronze), var(--vermillion), var(--bronze), transparent);
+        }
+
+        /* 底部装饰线 */
+        .login-box::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 20%;
+            right: 20%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--bronze-deep), transparent);
+        }
+
+        .login-header {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            margin-bottom: 35px;
+        }
+
+        .login-header h2 {
+            font-family: 'Noto Serif SC', serif;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--bronze-bright);
+            letter-spacing: 8px;
+        }
+
+        .login-header p {
+            color: var(--cream-muted);
+            font-size: 0.85rem;
+            letter-spacing: 3px;
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+
+        /* 分隔线装饰 */
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 0 0 30px;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--bronze-deep), transparent);
+        }
+
+        .divider span {
+            color: var(--bronze-deep);
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 2px;
+        }
+
+        .form-group {
+            margin-bottom: 22px;
+            position: relative;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 10px;
+            color: var(--bronze);
+            font-size: 0.85rem;
+            font-weight: 500;
+            letter-spacing: 4px;
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(15, 12, 10, 0.6);
+            border: 1px solid rgba(200, 149, 68, 0.15);
+            border-radius: 3px;
+            color: var(--cream);
+            font-size: 1rem;
+            font-family: 'Noto Sans SC', sans-serif;
+            font-weight: 400;
+            transition: all 0.3s;
+            outline: none;
+        }
+
+        .form-group input::placeholder {
+            color: var(--cream-dim);
+        }
+
+        .form-group input:focus {
+            border-color: var(--bronze);
+            box-shadow: 0 0 15px rgba(200, 149, 68, 0.12), inset 0 0 15px rgba(200, 149, 68, 0.03);
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, var(--bronze-deep), var(--vermillion));
+            color: var(--cream-bright);
+            border: none;
+            border-radius: 3px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            font-family: 'Noto Serif SC', serif;
+            letter-spacing: 12px;
+            padding-left: 28px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+            margin-top: 15px;
+        }
+
+        .login-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(245, 237, 217, 0.15), transparent);
+            transition: left 0.5s;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(197, 66, 37, 0.3), 0 0 40px rgba(200, 149, 68, 0.15);
+        }
+
+        .login-btn:hover::before {
+            left: 100%;
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .hint-box {
+            margin-top: 20px;
+            padding: 12px 14px;
+            background: rgba(197, 66, 37, 0.04);
+            border: 1px solid rgba(197, 66, 37, 0.1);
+            border-radius: 3px;
+            text-align: center;
+            font-size: 0.82rem;
+            color: var(--cream-muted);
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+
+        .hint-box code {
+            color: var(--bronze-bright);
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+            padding: 0 4px;
+        }
+
+        .footer-info {
+            margin-top: 25px;
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid rgba(200, 149, 68, 0.08);
+        }
+
+        .github-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--cream-muted);
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: all 0.3s;
+            padding: 8px 16px;
+            border: 1px solid rgba(200, 149, 68, 0.1);
+            border-radius: 3px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .github-link:hover {
+            color: var(--bronze-bright);
+            border-color: var(--bronze);
+            box-shadow: 0 0 12px rgba(200, 149, 68, 0.1);
+        }
+
+        .github-link svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+
+        .developer-tag {
+            margin-top: 15px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            color: var(--cream-dim);
+            letter-spacing: 3px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 900px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .left-panel {
+                flex: none;
+                height: auto;
+                padding: 40px 20px;
+            }
+
+            .forge-core {
+                width: 180px;
+                height: 180px;
+                margin-bottom: 20px;
+            }
+
+            .brand-cn {
+                font-size: 3rem;
+                letter-spacing: 8px;
+            }
+
+            .right-panel {
+                flex: 1;
+                padding: 20px;
+                align-items: flex-start;
+                padding-top: 20px;
+            }
+
+            .login-box {
+                padding: 35px 25px;
+            }
+        }
+
+        /* 滚动条 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--ink-deepest); }
+        ::-webkit-scrollbar-thumb { background: var(--bronze-deep); border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <!-- 背景层 -->
+    <div class="bg-ink"></div>
+    <div class="bg-noise"></div>
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+
+    <div class="container">
+        <!-- 左侧：炉心与品牌 -->
+        <div class="left-panel">
+            <div class="corner-deco tl"></div>
+            <div class="corner-deco tr"></div>
+            <div class="corner-deco bl"></div>
+            <div class="corner-deco br"></div>
+
+            <div class="forge-core">
+                <div class="forge-ring"></div>
+                <div class="forge-ring"></div>
+                <div class="forge-ring"></div>
+                <div class="forge-ember"></div>
+            </div>
+            <div class="left-content">
+                <h1 class="brand-cn">铸灵</h1>
+                <p class="brand-en">ZhuLing</p>
+                <p class="tagline">铸造 AI 灵魂</p>
+
+                <div class="tech-badges">
+                    <div class="badge">配置驱动 · 即配即用</div>
+                    <div class="badge">多 Agent · 独立运行</div>
+                    <div class="badge">会话记忆 · 上下文可控</div>
+                    <div class="badge">全链路可观测 · 实时轨迹</div>
+                    <div class="badge">Token 精算 · 用量透明</div>
+                    <div class="badge">MCP 工具遥测 · 调用可追溯</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：登录表单 -->
+        <div class="right-panel">
+            <div class="login-box">
+                <div class="login-header">
+                    <h2>入阵</h2>
+                    <p>鉴权认证 · 请输入凭证</p>
+                </div>
+
+                <div class="divider"><span>ZHU LING</span></div>
+
+                <form id="loginForm" style="position:relative;z-index:1">
+                    <div class="form-group">
+                        <label>账 号</label>
+                        <div class="input-wrapper">
+                            <input
+                                type="text"
+                                id="username"
+                                value="admin"
+                                placeholder="输入账号"
+                                required
+                            >
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>密 钥</label>
+                        <div class="input-wrapper">
+                            <input
+                                type="password"
+                                id="password"
+                                value="admin"
+                                placeholder="输入密钥"
+                                required
+                            >
+                        </div>
+                    </div>
+                    <button type="submit" class="login-btn">启 灵</button>
+                </form>
+
+                <div class="hint-box">
+                    默认凭证：<code>admin</code> / <code>admin</code>
+                </div>
+
+                <div class="footer-info">
+                    <a href="https://github.com/Vinist123" target="_blank" class="github-link">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                        </svg>
+                        github.com/Vinist123
+                    </a>
+                    <div class="developer-tag">CRAFTED BY VINIST</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 火星粒子 -->
+    <canvas id="emberCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;"></canvas>
+
+    <script>
+        // 登录处理
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value.trim();
+            const btn = document.querySelector('.login-btn');
+
+            btn.style.transform = 'scale(0.97)';
+            setTimeout(() => btn.style.transform = '', 120);
+
+            if (username === 'admin' && password === 'admin') {
+                const expires = new Date();
+                expires.setTime(expires.getTime() + (7 * 24 * 60 * 60 * 1000));
+                document.cookie = `username=${encodeURIComponent(username)}; expires=${expires.toUTCString()}; path=/`;
+                document.cookie = `loginStatus=success; expires=${expires.toUTCString()}; path=/`;
+
+                btn.textContent = '认证通过';
+                btn.style.background = 'linear-gradient(135deg, #5a8a6b, #c89544)';
+                setTimeout(() => {
+                    alert('认证通过\n欢迎回来，Admin。');
+                    window.location.href = 'index.html';
+                }, 400);
+            } else {
+                const box = document.querySelector('.login-box');
+                box.style.animation = 'shake 0.5s';
+                setTimeout(() => box.style.animation = '', 500);
+                alert('认证失败\n账号或密钥错误。');
+            }
+        });
+
+        // 抖动动画
+        const shakeStyle = document.createElement('style');
+        shakeStyle.textContent = `
+            @keyframes shake {
+                0%, 100% { transform: translateX(0); }
+                20% { transform: translateX(-8px); }
+                40% { transform: translateX(8px); }
+                60% { transform: translateX(-8px); }
+                80% { transform: translateX(8px); }
+            }
+        `;
+        document.head.appendChild(shakeStyle);
+
+        // 火星粒子效果
+        const canvas = document.getElementById('emberCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let embers = [];
+        const emberColors = ['#e0b560', '#c89544', '#e85a3a', '#c54225', '#d4a04a'];
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        function createEmber() {
+            return {
+                x: Math.random() * canvas.width,
+                y: canvas.height + 10,
+                vx: (Math.random() - 0.5) * 0.4,
+                vy: -(Math.random() * 0.6 + 0.2),
+                size: Math.random() * 2.5 + 0.8,
+                color: emberColors[Math.floor(Math.random() * emberColors.length)],
+                opacity: 0,
+                maxOpacity: Math.random() * 0.4 + 0.4,
+                life: 0,
+                maxLife: Math.random() * 300 + 200
+            };
+        }
+
+        for (let i = 0; i < 55; i++) {
+            const e = createEmber();
+            e.y = Math.random() * canvas.height;
+            e.life = Math.random() * e.maxLife;
+            embers.push(e);
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            embers.forEach((e, i) => {
+                e.x += e.vx;
+                e.y += e.vy;
+                e.vx += (Math.random() - 0.5) * 0.02;
+                e.life++;
+
+                // 淡入淡出
+                const lifeRatio = e.life / e.maxLife;
+                if (lifeRatio < 0.2) {
+                    e.opacity = (lifeRatio / 0.2) * e.maxOpacity;
+                } else if (lifeRatio > 0.8) {
+                    e.opacity = ((1 - lifeRatio) / 0.2) * e.maxOpacity;
+                } else {
+                    e.opacity = e.maxOpacity;
+                }
+
+                ctx.beginPath();
+                ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
+                ctx.fillStyle = e.color;
+                ctx.globalAlpha = e.opacity;
+                ctx.fill();
+
+                // 光晕
+                ctx.beginPath();
+                ctx.arc(e.x, e.y, e.size * 4, 0, Math.PI * 2);
+                ctx.fillStyle = e.color;
+                ctx.globalAlpha = e.opacity * 0.2;
+                ctx.fill();
+
+                if (e.life >= e.maxLife || e.y < -20) {
+                    embers[i] = createEmber();
+                }
+            });
+
+            ctx.globalAlpha = 1;
+
+            // 微弱连线
+            ctx.strokeStyle = 'rgba(200, 149, 68, 0.08)';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i < embers.length; i++) {
+                for (let j = i + 1; j < embers.length; j++) {
+                    const dx = embers[i].x - embers[j].x;
+                    const dy = embers[i].y - embers[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 120) {
+                        ctx.globalAlpha = (1 - dist / 120) * 0.25;
+                        ctx.beginPath();
+                        ctx.moveTo(embers[i].x, embers[i].y);
+                        ctx.lineTo(embers[j].x, embers[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+            ctx.globalAlpha = 1;
+
+            requestAnimationFrame(animate);
+        }
+        animate();
+    </script>
+</body>
+</html>
