@@ -25,15 +25,15 @@
 
 ### 登录
 
-![铸灵登录页](docs/img/zl-login.png)
+![铸灵登录页](img/zl-login.png)
 
 ### 对话目标选择
 
-![铸灵对话目标选择](docs/img/zl-index.png)
+![铸灵对话目标选择](img/zl-index.png)
 
 ### 可观测对话工作台
 
-![铸灵可观测对话工作台](docs/img/zl-chat.png)
+![铸灵可观测对话工作台](img/zl-chat.png)
 
 ## 🏗️ 技术栈
 
