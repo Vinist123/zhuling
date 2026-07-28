@@ -1,0 +1,15 @@
+{
+  "songs": [
+    {"artist": "王力宏", "title": "天地龙鳞"},
+    {"artist": "王力宏", "title": "依然爱你"},
+    {"artist": "蔡依林", "title": "日不落"},
+    {"artist": "邓紫棋", "title": "泡沫"},
+    {"artist": "林俊杰", "title": "江南"},
+    {"artist": "林俊杰", "title": "她说"},
+    {"artist": "林俊杰", "title": "修炼爱情"},
+    {"artist": "周杰伦", "title": "七里香"},
+    {"artist": "周杰伦", "title": "青花瓷"},
+    {"artist": "周杰伦", "title": "夜曲"},
+    {"artist": "周杰伦", "title": "晴天"}
+  ]
+}

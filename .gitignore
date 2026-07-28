@@ -24,9 +24,6 @@ data/
 
 ### Local config (secrets, environment-specific) ###
 application-local.yml
-application-dev.yml
-application-prod.yml
-application-test.yml
 .env
 
 ### Runtime artifacts ###

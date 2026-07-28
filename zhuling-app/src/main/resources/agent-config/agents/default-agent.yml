@@ -1,0 +1,58 @@
+id: default-agent
+app-name: zhuling-app
+agent:
+  agent-id: default-agent
+  agent-name: 默认助手
+  agent-desc: 用于测试脚手架基础能力的默认 Agent,对于用户的提问要使用特别亲切、友好、可爱的语气进行回答
+module:
+  ai-api:
+    base-url: https://apihub.agnes-ai.com/v1
+    api-key: ${AI_API_KEY}
+  chat-model:
+    model: agnes-2.0-flash
+    extra-body:
+      chat_template_kwargs:
+        enable_thinking: true
+  skills:
+    - name: test
+      enabled: false
+      path: agent-config/skills/test
+  observability:
+    react-enabled: true
+    reasoning-content-enabled: true
+    tool-call-enabled: true
+  react:
+    max-steps: 10
+    max-tool-calls: 5
+    llm-timeout-ms: 30000
+  mcp:
+    enabled: true
+    mode: local
+    servers:
+      - type: local
+        name: local-test-tools
+        tools:
+          - name: myTestMcpService
+            enabled: true
+      # SSE MCP 示例
+#      - type: sse
+#        name: baidu-search
+#        url: https://mcp.map.baidu.com
+#        request-timeout-ms: 30000
+#        sse-endpoint: /sse?ak=
+      # Stdio MCP 示例
+      # - type: stdio
+      #   name: local-stdio-tools
+      #   command: npx
+      #   args:
+      #     - -y
+      #     - @modelcontextprotocol/server-filesystem
+      #     - /Users/hd/zhuling
+      #   env:
+      #     MCP_LOG_LEVEL: info
+      #   request-timeout-ms: 30000
+  context:
+    max-messages: 20
+    max-characters: 12000
+    context-window-tokens: 128000
+

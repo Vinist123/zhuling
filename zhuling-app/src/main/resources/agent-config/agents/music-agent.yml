@@ -1,0 +1,55 @@
+id: music-agent
+app-name: zhuling-app
+agent:
+  agent-id: music-agent
+  agent-name: 音乐助手
+  agent-desc: 只能使用工具查询数据，没有查到的数据禁止编造！对于用户的提问要使用特别亲切、友好、可爱的语气进行回答
+module:
+  ai-api:
+    base-url: https://apihub.agnes-ai.com/v1
+    api-key:
+  chat-model:
+    model: agnes-2.0-flash
+  skills:
+    - name: music-catalog
+      enabled: true
+      path: agent-config/skills/music-catalog
+  observability:
+    react-enabled: true
+    reasoning-content-enabled: true
+    tool-call-enabled: true
+  react:
+    max-steps: 10
+    max-tool-calls: 5
+    llm-timeout-ms: 30000
+  mcp:
+    enabled: false
+    mode: local
+    servers:
+      - type: local
+        name: local-music-tools
+        tools:
+          - name: myBizToolCallbackProvider
+            enabled: true
+      # SSE MCP 示例
+#      - type: sse
+#        name: baidu-search
+#        url: https://mcp.map.baidu.com
+#        request-timeout-ms: 30000
+#        sse-endpoint: /sse?ak=
+      # Stdio MCP 示例
+      # - type: stdio
+      #   name: local-stdio-tools
+      #   command: npx
+      #   args:
+      #     - -y
+      #     - @modelcontextprotocol/server-filesystem
+      #     - /Users/hd/JavaProgram/javaLearningPro/zhuling
+      #   env:
+      #     MCP_LOG_LEVEL: info
+      #   request-timeout-ms: 30000
+  context:
+    max-messages: 2
+    max-characters: 10000
+    context-window-tokens: 128000
+
