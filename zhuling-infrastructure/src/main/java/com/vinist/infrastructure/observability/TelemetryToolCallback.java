@@ -38,6 +38,18 @@ public class TelemetryToolCallback implements ToolCallback {
         this.eventPublisher = eventPublisher;
     }
 
+    public ToolCallback getDelegate() {
+        return delegate;
+    }
+
+    public String getToolType() {
+        return toolType;
+    }
+
+    public String getServerName() {
+        return serverName;
+    }
+
     @Override
     public ToolDefinition getToolDefinition() {
         return delegate.getToolDefinition();

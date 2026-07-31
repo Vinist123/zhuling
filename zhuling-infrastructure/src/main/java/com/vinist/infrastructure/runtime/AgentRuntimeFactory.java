@@ -3,6 +3,7 @@ package com.vinist.infrastructure.runtime;
 import com.vinist.domain.agent.model.AgentConfigModel;
 import com.vinist.domain.agent.model.AgentRuntime;
 import com.vinist.domain.agent.model.ModuleConfig;
+import com.vinist.domain.agent.adapter.port.IReactModelPort;
 import com.vinist.domain.agent.service.IConversationStreamEventPublisher;
 import com.vinist.domain.agent.service.ITurnTelemetryService;
 import com.vinist.infrastructure.adapter.port.ChatModelPortImpl;
@@ -10,6 +11,7 @@ import com.vinist.infrastructure.adapter.port.ToolRegistryPortImpl;
 import com.vinist.infrastructure.gateway.IChatModelGatewayService;
 import com.vinist.infrastructure.gateway.mcp.McpToolCallbackFactory;
 import com.vinist.infrastructure.gateway.skills.SkillToolCallbackFactory;
+import com.vinist.infrastructure.runtime.react.NativeReactModelPortFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
@@ -23,19 +25,22 @@ public class AgentRuntimeFactory {
     private final ITurnTelemetryService turnTelemetryService;
     private final IConversationStreamEventPublisher eventPublisher;
     private final IChatModelGatewayService chatModelGatewayService;
+    private final NativeReactModelPortFactory nativeReactModelPortFactory;
 
     public AgentRuntimeFactory(ApplicationContext applicationContext,
                                McpToolCallbackFactory mcpToolCallbackFactory,
                                SkillToolCallbackFactory skillToolCallbackFactory,
                                ITurnTelemetryService turnTelemetryService,
                                IConversationStreamEventPublisher eventPublisher,
-                               IChatModelGatewayService chatModelGatewayService) {
+                               IChatModelGatewayService chatModelGatewayService,
+                               NativeReactModelPortFactory nativeReactModelPortFactory) {
         this.applicationContext = applicationContext;
         this.mcpToolCallbackFactory = mcpToolCallbackFactory;
         this.skillToolCallbackFactory = skillToolCallbackFactory;
         this.turnTelemetryService = turnTelemetryService;
         this.eventPublisher = eventPublisher;
         this.chatModelGatewayService = chatModelGatewayService;
+        this.nativeReactModelPortFactory = nativeReactModelPortFactory;
     }
 
     public AgentRuntime create(AgentConfigModel config) {
@@ -46,10 +51,13 @@ public class AgentRuntimeFactory {
 
         ChatClient chatClient = chatModelGatewayService.createChatClient(
                 config, toolRegistry.getAllToolCallbacks());
+        IReactModelPort reactModelPort = isReactEnabled(config)
+                ? nativeReactModelPortFactory.create(config, toolRegistry.getAllToolCallbacks()) : null;
         return AgentRuntime.builder()
                 .agentId(config.getId())
                 .config(config)
                 .chatModelPort(new ChatModelPortImpl(chatClient, turnTelemetryService, eventPublisher))
+                .reactModelPort(reactModelPort)
                 .toolRegistryPort(toolRegistry)
                 .build();
     }
@@ -63,6 +71,13 @@ public class AgentRuntimeFactory {
             toolRegistry.registerMcpTools(moduleConfig.getMcp());
         }
         toolRegistry.registerSkillsTools(moduleConfig.getSkills());
+    }
+
+    private boolean isReactEnabled(AgentConfigModel config) {
+        ModuleConfig moduleConfig = config.getModule();
+        ModuleConfig.ObservabilityConfig observabilityConfig = moduleConfig != null
+                ? moduleConfig.getObservability() : null;
+        return observabilityConfig != null && Boolean.TRUE.equals(observabilityConfig.getReactEnabled());
     }
 
 }

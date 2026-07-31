@@ -19,6 +19,8 @@
 - ✅ Skills 脚本包加载与执行
 - ✅ 完整的可观测性（Token 统计、工具遥测、Trace ID、上下文占用比）
 - ✅ 版本化 SSE 事件信封（turn / message / reasoning / tool 生命周期事件）
+- ✅ **单 Agent ReAct 执行内核**（多步 `thought → act → observe`、过程级观测、实时步骤轨迹）
+- ✅ 节点生命周期拦截器（观测、错误归一化、安全策略扩展点）
 - ✅ 内置可观测对话工作台 UI
 
 ## 🖼️ 界面预览
@@ -60,7 +62,7 @@ zhuling/
 ├── zhuling-infrastructure/   # 基础设施层（DAO、Gateway、Redis、可观测性实现）
 ├── zhuling-trigger/          # 触发层（HTTP Controller）
 ├── zhuling-app/              # 启动模块（配置文件、Agent YAML、Skills）
-├── ui/                           # 可观测对话工作台（纯静态前端）
+├── zhuling-ui/                    # 可观测对话工作台（纯静态前端）
 └── docs/                         # 设计文档、SQL 脚本
 ```
 
@@ -157,7 +159,7 @@ java -jar target/zhuling-app-1.0-SNAPSHOT.jar
 
 ### 6. 验证
 
-- **工作台 UI**：直接用浏览器打开 `ui/index.html`
+- **工作台 UI**：直接用浏览器打开 `zhuling-ui/index.html`
 - **API 测试**：参考下方 [API 接口文档](#-api-接口文档)
 
 ## 📋 Agent YAML 配置详解
@@ -202,7 +204,7 @@ module:
     reasoning-content-enabled: true            # 推理过程展示开关
     tool-call-enabled: true                    # 工具调用信息展示开关
 
-  # ReAct 参数（预留，Phase 7 生效）
+  # ReAct 参数（沿用 Phase 7 实现，react-enabled 开启后生效）
   react:
     max-steps: 10                              # 最大推理步数
     max-tool-calls: 5                          # 最大工具调用次数
@@ -429,11 +431,16 @@ curl -N -X POST http://localhost:8091/api/v1/chat/stream \
 |---|---|
 | `turn.started` | 本轮对话开始，包含 Target、模型、Trace 信息 |
 | `message.delta` | 文本增量 |
-| `reasoning.delta` | 推理过程增量（供应商支持时） |
+| `reasoning.delta` | 推理过程增量（供应商支持时；ReAct 模式下整段补发于每步结束） |
 | `tool.started` | 工具开始执行 |
 | `tool.completed` | 工具执行完成 |
+| `agent.step.started` | ReAct 步骤开始（含 stepIndex、phase） |
+| `agent.step.completed` | ReAct 步骤完成（含 thought、工具意图、步内摘要） |
+| `agent.loop.completed` | ReAct 循环结束（含 exitReason、步数、工具总数） |
 | `turn.completed` | 本轮对话完成，包含完整 metadata |
 | `turn.failed` | 本轮对话失败，包含错误信息 |
+
+> 💡 开启 `observability.react-enabled` 后，前端工作台会以「Step N」分组展示 `thought → act → observe` 的逐步轨迹，并在气泡摘要与右侧观测面板标注 `ReAct · N 步`，便于确认本轮是否走了 ReAct 模式。
 
 ## 🖥️ 可观测对话工作台
 
@@ -459,7 +466,7 @@ curl -N -X POST http://localhost:8091/api/v1/chat/stream \
 | Phase 6 | MCP 支持 | ✅ |
 | Phase 6.5 | 可观测性增强 | ✅ |
 | Phase 6.6 | 多 Agent 运行时基础 | ✅ |
-| Phase 7 | ReAct 模式 | ⏳ |
+| Phase 7 | ReAct 模式 | ✅ |
 | Phase 8 | 多 Agent 协同 | ⏳ |
 | Phase 9 | 多模态支持 | ⏳ |
 | Phase 10 | 测试与文档 | ⏳ |

@@ -420,6 +420,9 @@
         .trace-row .trace-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .trace-row time { color: var(--cream-dim); font-size: 0.61rem; }
 
+        .react-step { margin: 5px 0 5px 14px; padding-left: 9px; border-left: 1px dashed var(--bronze-deep); display: grid; gap: 6px; }
+        .message-row[data-agent-mode="react"] .message-avatar { color: var(--bronze-bright); border-color: var(--bronze); background: rgba(200, 149, 68, 0.1); }
+
         details.trace-detail {
             margin: 0;
             padding: 8px 9px;
@@ -978,7 +981,9 @@
         row.appendChild(body);
         elements.messagesArea.appendChild(row);
 
-        const view = { row, body, track, text, time, metadata, content: content || '', toolRows: [], reasoningNode: null, summary: null, isLive };
+        const view = { row, body, track, text, time, metadata, content: content || '',
+            toolRows: [], reasoningNode: null, summary: null, isLive,
+            reactMode: false, steps: new Map(), currentStep: null };
         if (isLive) {
             appendTraceRow(view, 'active', '请求模型', '已开始');
             text.textContent = '';
@@ -1058,6 +1063,7 @@
         const context = metadata.context || {};
         const timing = metadata.timing || {};
         const chips = [
+            (metadata.react && metadata.react.mode === 'react') ? `ReAct · ${metadata.react.stepCount || 0} 步` : null,
             usage.totalTokens !== undefined && usage.totalTokens !== null ? `${usage.totalTokens} tokens` : null,
             Array.isArray(metadata.toolCalls) ? `${metadata.toolCalls.length} tools` : null,
             timing.durationMs !== undefined && timing.durationMs !== null ? formatDuration(timing.durationMs) : null,
@@ -1141,6 +1147,36 @@
                 container.appendChild(copyButton);
             }
         });
+
+        const react = metadata.react || {};
+        if (react.mode === 'react' || react.exitReason) {
+            addInspectorSection('ReAct 过程', container => {
+                appendKeyValues(container, [
+                    ['Mode', react.mode || 'react'],
+                    ['Exit Reason', react.exitReason],
+                    ['Step Count', react.stepCount],
+                    ['Total Tool Calls', react.totalToolCalls],
+                    ['Max Steps', react.maxSteps],
+                    ['Max Tool Calls', react.maxToolCalls],
+                    ['LLM Timeout', react.llmTimeoutMs ? `${react.llmTimeoutMs} ms` : null],
+                    ['Duration', react.durationMs != null ? formatDuration(react.durationMs) : null],
+                    ['Error', react.errorMessage]
+                ]);
+                const steps = Array.isArray(react.steps) ? react.steps : [];
+                if (steps.length > 0) {
+                    const block = createElement('div', 'detail-block');
+                    block.appendChild(createElement('div', 'detail-title', `Steps (${steps.length})`));
+                    steps.forEach((step, index) => {
+                        const line = createElement('div', 'detail-note');
+                        const names = Array.isArray(step.toolNames) ? step.toolNames.join(', ') : '-';
+                        line.textContent = `#${step.index} · ${step.toolCallCount} 工具 · ${names}`
+                            + (step.failedToolCount ? ` · ${step.failedToolCount} 失败` : '');
+                        block.appendChild(line);
+                    });
+                    container.appendChild(block);
+                }
+            }, false);
+        }
 
         addInspectorSection('资源用量', container => {
             const grid = createElement('div', 'resource-grid');
@@ -1301,7 +1337,11 @@
                 note: payload.note,
                 content: `${turn.metadata.reasoning.content || ''}${payload.text || ''}`
             };
-            appendReasoning(turn.view, payload.text, payload.status, payload.note);
+            if (turn.view.reactMode && turn.view.currentStep) {
+                appendStepReasoning(turn, turn.view.currentStep.index, payload.text, payload.status, payload.note);
+            } else {
+                appendReasoning(turn.view, payload.text, payload.status, payload.note);
+            }
         } else if (data.type === 'tool.started') {
             turn.metadata.toolCalls.push({
                 toolName: payload.toolName,
@@ -1309,14 +1349,29 @@
                 serverName: payload.serverName,
                 inputPreview: payload.inputPreview
             });
-            appendToolStarted(turn.view, payload);
+            if (turn.view.reactMode && turn.view.currentStep) {
+                appendStepTool(turn, turn.view.currentStep.index, payload);
+            } else {
+                appendToolStarted(turn.view, payload);
+            }
         } else if (data.type === 'tool.completed') {
             const tool = [...turn.metadata.toolCalls].reverse().find(item => !item.completed && item.toolName === payload.toolName);
             if (tool) Object.assign(tool, payload, { completed: true });
             else turn.metadata.toolCalls.push({ ...payload, completed: true });
-            appendToolCompleted(turn.view, payload);
+            if (turn.view.reactMode && turn.view.currentStep) {
+                completeStepTool(turn, turn.view.currentStep.index, payload);
+            } else {
+                appendToolCompleted(turn.view, payload);
+            }
         } else if (data.type === 'turn.completed' || data.type === 'turn.failed') {
             finalizeLiveTurn(turn, payload, data.type === 'turn.failed');
+        } else if (data.type === 'agent.step.started') {
+            ensureReactStep(turn, payload);
+            markReactMode(turn);
+        } else if (data.type === 'agent.step.completed') {
+            completeReactStep(turn, payload);
+        } else if (data.type === 'agent.loop.completed') {
+            finalizeReactLoop(turn, payload);
         }
         selectMetadata(turn.metadata, turn.view.row);
         scrollMessages();
@@ -1338,6 +1393,114 @@
         state.selectedMetadata = metadata;
         state.activeTurn = null;
         renderConversationHeading();
+    }
+
+    function markReactMode(turn) {
+        if (turn.view.reactMode) return;
+        turn.view.reactMode = true;
+        turn.metadata.react = turn.metadata.react || { mode: 'react', stepCount: 0, totalToolCalls: 0 };
+        turn.view.row.dataset.agentMode = 'react';
+        appendTraceRow(turn.view, 'active', 'ReAct 模式', '启用多步推理-行动循环');
+    }
+
+    function ensureReactStep(turn, payload) {
+        const index = Number(payload.stepIndex);
+        if (!Number.isFinite(index)) return;
+        markReactMode(turn);
+        // 每个 step 一个独立容器，下面挂该步的推理与工具调用，保证 thought→act→observe 顺序真实
+        const container = createElement('div', 'react-step');
+        const header = createElement('div', 'trace-row active');
+        header.appendChild(createElement('span', 'trace-indicator'));
+        header.appendChild(createElement('span', 'trace-detail', `Step ${index} · 思考中`));
+        header.appendChild(createElement('time', '', formatTime()));
+        container.appendChild(header);
+        turn.view.track.appendChild(container);
+
+        const step = { index, container, header, reasoningNode: null, toolRows: [], toolCallCount: 0, done: false };
+        turn.view.steps.set(index, step);
+        turn.view.currentStep = step;
+    }
+
+    function appendStepReasoning(turn, index, text, status, note) {
+        const step = turn.view.steps.get(index);
+        if (!step) return;
+        if (!step.reasoningNode) {
+            const detail = document.createElement('details');
+            detail.className = 'trace-detail';
+            const summary = createElement('summary', '', '推理');
+            const content = createElement('div', 'trace-data');
+            detail.appendChild(summary);
+            detail.appendChild(content);
+            step.container.appendChild(detail);
+            step.reasoningNode = { detail, summary, content };
+        }
+        if (status) step.reasoningNode.summary.textContent = `推理 · ${status}`;
+        step.reasoningNode.content.textContent += text || note || '';
+    }
+
+    function appendStepTool(turn, index, payload) {
+        const step = turn.view.steps.get(index) || turn.view.currentStep;
+        if (!step) return;
+        const detail = document.createElement('details');
+        detail.className = 'trace-detail';
+        const summary = createElement('summary', '', `工具 · ${payload.toolName || 'unknown'} · 运行中`);
+        const content = createElement('div', 'trace-data');
+        content.textContent = payload.inputPreview || '无输入预览';
+        detail.appendChild(summary);
+        detail.appendChild(content);
+        step.container.appendChild(detail);
+        const tool = { name: payload.toolName, detail, summary, content, completed: false };
+        step.toolRows.push(tool);
+        return tool;
+    }
+
+    function completeStepTool(turn, index, payload) {
+        const step = turn.view.steps.get(index) || turn.view.currentStep;
+        if (!step) return;
+        const tool = [...step.toolRows].reverse().find(item => !item.completed && item.name === payload.toolName)
+            || appendStepTool(turn, index, payload);
+        tool.completed = true;
+        tool.summary.textContent = `工具 · ${payload.toolName || 'unknown'} · ${payload.success === false ? '失败' : '完成'}`;
+        const output = payload.success === false ? (payload.errorMessage || '工具执行失败') : (payload.outputPreview || '无输出预览');
+        tool.content.textContent = output;
+        appendTraceRow(turn.view, payload.success === false ? 'failed' : 'done',
+            `Step ${index} 工具`, formatDuration(payload.durationMs));
+    }
+
+    function completeReactStep(turn, payload) {
+        const index = Number(payload.stepIndex);
+        const step = turn.view.steps.get(index);
+        if (!step) return;
+        step.done = true;
+        step.header.className = 'trace-row done';
+        const detail = `Step ${index} · 完成`;
+        const note = payload.toolCallCount > 0
+            ? `${payload.toolCallCount} 次工具 · ${(payload.toolNames || []).join(',')}` : '无需工具';
+        step.header.querySelector('.trace-detail').textContent = `${detail} · ${note}`;
+        // 若 ChatModelPort 未逐块推送 reasoning.delta，则在此用完整 thought 兜底渲染
+        if (payload.thought && !step.reasoningNode) {
+            appendStepReasoning(turn, index, payload.thought, 'stable', null);
+        }
+        turn.metadata.react = turn.metadata.react || { mode: 'react' };
+        turn.metadata.react.stepCount = Math.max(turn.metadata.react.stepCount || 0, index);
+    }
+
+    function finalizeReactLoop(turn, payload) {
+        markReactMode(turn);
+        turn.metadata.react = Object.assign(turn.metadata.react || { mode: 'react' }, {
+            mode: 'react',
+            exitReason: payload.exitReason,
+            stepCount: payload.stepCount,
+            totalToolCalls: payload.totalToolCalls,
+            errorMessage: payload.errorMessage || null,
+            startedAt: payload.startedAt,
+            finishedAt: payload.finishedAt
+        });
+        appendTraceRow(turn.view, payload.exitReason === 'COMPLETED' ? 'done' : 'failed',
+            'ReAct 循环结束', `${payload.stepCount} 步 · ${payload.totalToolCalls} 次工具`);
+        if (turn.activeStep && !turn.activeStep.done) {
+            turn.activeStep.header.className = 'trace-row done';
+        }
     }
 
     async function streamChat(sessionId, message) {

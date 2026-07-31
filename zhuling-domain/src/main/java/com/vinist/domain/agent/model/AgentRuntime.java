@@ -1,6 +1,7 @@
 package com.vinist.domain.agent.model;
 
 import com.vinist.domain.agent.adapter.port.IChatModelPort;
+import com.vinist.domain.agent.adapter.port.IReactModelPort;
 import com.vinist.domain.agent.adapter.port.IToolRegistryPort;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,6 +19,8 @@ public class AgentRuntime {
     private AgentConfigModel config;
 
     private IChatModelPort chatModelPort;
+
+    private IReactModelPort reactModelPort;
 
     private IToolRegistryPort toolRegistryPort;
 

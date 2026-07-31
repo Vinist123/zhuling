@@ -1,5 +1,7 @@
 package com.vinist.caseflow.agent;
 
+import com.vinist.domain.agent.adapter.port.IAgentExecutionEngine;
+import com.vinist.domain.agent.adapter.port.IReactModelPort;
 import com.vinist.domain.agent.model.AgentConfigModel;
 import com.vinist.domain.agent.model.AgentRuntime;
 import com.vinist.domain.agent.model.MessageMetadataPolicy;
@@ -7,9 +9,21 @@ import com.vinist.domain.agent.model.ModuleConfig;
 import com.vinist.domain.agent.model.ChatTargetType;
 import com.vinist.domain.agent.model.entity.MessageEntity;
 import com.vinist.domain.agent.model.entity.SessionEntity;
+import com.vinist.domain.agent.model.react.ReactExecutionPolicy;
+import com.vinist.domain.agent.model.react.ReactExecutionRequest;
+import com.vinist.domain.agent.model.react.ReactExecutionResult;
+import com.vinist.domain.agent.model.react.ReactExitReason;
+import com.vinist.domain.agent.model.react.ReactModelResponse;
+import com.vinist.domain.agent.model.react.ReactStep;
+import com.vinist.domain.agent.model.react.ReactToolResult;
+import com.vinist.domain.agent.model.telemetry.ChatUsageMetrics;
 import com.vinist.domain.agent.model.telemetry.ConversationStreamEvent;
 import com.vinist.domain.agent.model.telemetry.ConversationStreamEventType;
+import com.vinist.domain.agent.model.telemetry.ReasoningContentStatus;
+import com.vinist.domain.agent.model.telemetry.ReactProcessTelemetry;
+import com.vinist.domain.agent.model.telemetry.ReactStepSummary;
 import com.vinist.domain.agent.model.telemetry.TurnTelemetry;
+import com.vinist.domain.agent.model.telemetry.ToolCallTelemetry;
 import com.vinist.domain.agent.service.IAgentRuntimeRegistry;
 import com.vinist.domain.agent.service.IChatService;
 import com.vinist.domain.agent.service.IConversationStreamEventPublisher;
@@ -21,7 +35,9 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Signal;
+import reactor.core.scheduler.Schedulers;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,17 +60,20 @@ public class ChatServiceImpl implements IChatService {
     private final ITurnTelemetryService turnTelemetryService;
     private final IAgentRuntimeRegistry agentRuntimeRegistry;
     private final IConversationStreamEventPublisher eventPublisher;
+    private final IAgentExecutionEngine agentExecutionEngine;
 
     public ChatServiceImpl(ISessionService sessionService,
                            IMessageMetadataCollector messageMetadataCollector,
                            ITurnTelemetryService turnTelemetryService,
                            IAgentRuntimeRegistry agentRuntimeRegistry,
-                           IConversationStreamEventPublisher eventPublisher) {
+                           IConversationStreamEventPublisher eventPublisher,
+                           IAgentExecutionEngine agentExecutionEngine) {
         this.sessionService = sessionService;
         this.messageMetadataCollector = messageMetadataCollector;
         this.turnTelemetryService = turnTelemetryService;
         this.agentRuntimeRegistry = agentRuntimeRegistry;
         this.eventPublisher = eventPublisher;
+        this.agentExecutionEngine = agentExecutionEngine;
     }
 
     @Override
@@ -78,7 +97,9 @@ public class ChatServiceImpl implements IChatService {
         turnTelemetryService.bindCurrentTurn(turnTelemetry);
         try {
             persistMessage(buildUserMessage(session, message, false, turnTelemetry));
-            String response = runtime.getChatModelPort().call(systemPrompt, history, message);
+            String response = isReactEnabled(runtime)
+                    ? executeReact(runtime, systemPrompt, history, message, turnTelemetry)
+                    : runtime.getChatModelPort().call(systemPrompt, history, message);
             persistMessage(buildAssistantMessage(session, response, false, startedAtMs, null, turnTelemetry));
             return response;
         } catch (RuntimeException ex) {
@@ -117,13 +138,16 @@ public class ChatServiceImpl implements IChatService {
                                 MessageEntity userMessage = buildUserMessage(session, message, true, turnTelemetry);
 
                                 Flux<ConversationStreamEvent> execution = sessionService.saveMessage(userMessage)
-                                        .thenMany(runtime.getChatModelPort()
-                                                .stream(systemPrompt, history, message, turnTelemetry)
-                                                .materialize()
-                                                .concatMap(signal -> handleStreamSignal(
-                                                        signal, session, assistantContent, startedAtMs, turnTelemetry))
-                                                .onErrorResume(error -> persistAssistantAndEmitTerminal(
-                                                        session, assistantContent.toString(), startedAtMs, turnTelemetry, error)));
+                                        .thenMany(
+                                                isReactEnabled(runtime)
+                                                        ? emitReactStream(runtime, systemPrompt, history, message, turnTelemetry)
+                                                        : runtime.getChatModelPort().stream(systemPrompt, history, message, turnTelemetry)
+                                        )
+                                        .materialize()
+                                        .concatMap(signal -> handleStreamSignal(
+                                                signal, session, assistantContent, startedAtMs, turnTelemetry))
+                                        .onErrorResume(error -> persistAssistantAndEmitTerminal(
+                                                session, assistantContent.toString(), startedAtMs, turnTelemetry, error));
 
                                 return eventPublisher.events(turnTelemetry.getTurnId())
                                         .mergeWith(execution)
@@ -261,6 +285,239 @@ public class ChatServiceImpl implements IChatService {
             return desc.isEmpty() ? null : desc;
         }
         return null;
+    }
+
+    private String executeReact(AgentRuntime runtime,
+                                String systemPrompt,
+                                List<MessageEntity> history,
+                                String message,
+                                TurnTelemetry telemetry) {
+        IReactModelPort reactModelPort = runtime.getReactModelPort();
+        if (reactModelPort == null) {
+            throw new IllegalStateException("Agent 未初始化 ReAct 运行时: " + runtime.getAgentId());
+        }
+        ReactExecutionPolicy policy = resolveReactPolicy(runtime);
+        ReactExecutionRequest request = ReactExecutionRequest.builder()
+                .agentId(runtime.getAgentId())
+                .systemPrompt(systemPrompt)
+                .history(history)
+                .userMessage(message)
+                .policy(policy)
+                .turnTelemetry(telemetry)
+                .build();
+        ReactExecutionResult result = agentExecutionEngine.execute(request, reactModelPort)
+                .blockOptional()
+                .orElseThrow(() -> new IllegalStateException("ReAct 执行未返回结果"));
+        // 先记录过程级观测，再判断退出原因；保证错误路径（非 COMPLETED 抛异常）也能落库
+        if (telemetry != null) {
+            telemetry.setReactProcess(buildReactProcess(result, policy));
+            populateTelemetryFromReact(telemetry, result);
+        }
+        if (result.getExitReason() != ReactExitReason.COMPLETED) {
+            throw new IllegalStateException("ReAct 执行未完成: " + result.getExitReason()
+                    + (result.getErrorMessage() != null ? ", " + result.getErrorMessage() : ""));
+        }
+        return result.getFinalAnswer();
+    }
+
+    /**
+     * 流式路径的 ReAct 适配：响应式订阅完整 ReAct 循环，
+     * ReAct 循环期间的 thought/act/observe 通过 SSE 事件（reasoning.delta / tool.started /
+     * tool.completed / agent.step.*）实时推送；最终答案在循环结束后拆成小块回放为
+     * Flux&lt;String&gt;，使现有流式管道（materialize → handleStreamSignal → onErrorResume）无缝复用。
+     *
+     * <p>过程级观测（reactProcess / reasoning / usage / toolCalls）在结果返回时写入 telemetry，
+     * 供终态事件 turn.completed 的 metadata 携带 react 段落库。
+     */
+    private Flux<String> emitReactStream(AgentRuntime runtime,
+                                          String systemPrompt,
+                                          List<MessageEntity> history,
+                                          String message,
+                                          TurnTelemetry telemetry) {
+        IReactModelPort reactModelPort = runtime.getReactModelPort();
+        if (reactModelPort == null) {
+            return Flux.error(new IllegalStateException("Agent 未初始化 ReAct 运行时: " + runtime.getAgentId()));
+        }
+        ReactExecutionPolicy policy = resolveReactPolicy(runtime);
+        ReactExecutionRequest request = ReactExecutionRequest.builder()
+                .agentId(runtime.getAgentId())
+                .systemPrompt(systemPrompt)
+                .history(history)
+                .userMessage(message)
+                .policy(policy)
+                .turnTelemetry(telemetry)
+                .build();
+
+        return agentExecutionEngine.execute(request, reactModelPort)
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnNext(result -> {
+                    if (telemetry != null) {
+                        telemetry.setReactProcess(buildReactProcess(result, policy));
+                        populateTelemetryFromReact(telemetry, result);
+                    }
+                })
+                .flatMapMany(result -> {
+                    if (result.getExitReason() != ReactExitReason.COMPLETED) {
+                        return Flux.error(new IllegalStateException("ReAct 执行未完成: " + result.getExitReason()
+                                + (result.getErrorMessage() != null ? ", " + result.getErrorMessage() : "")));
+                    }
+                    return Flux.fromStream(splitToChunks(result.getFinalAnswer()));
+                });
+    }
+
+    private static final int REACT_STREAM_CHUNK_SIZE = 4;
+
+    private java.util.stream.Stream<String> splitToChunks(String text) {
+        if (text == null || text.isEmpty()) {
+            return java.util.stream.Stream.of("");
+        }
+        java.util.List<String> chunks = new java.util.ArrayList<>();
+        for (int i = 0; i < text.length(); i += REACT_STREAM_CHUNK_SIZE) {
+            chunks.add(text.substring(i, Math.min(i + REACT_STREAM_CHUNK_SIZE, text.length())));
+        }
+        return chunks.stream();
+    }
+
+    private ReactProcessTelemetry buildReactProcess(ReactExecutionResult result, ReactExecutionPolicy policy) {
+        java.util.List<ReactStepSummary> summaries = new java.util.ArrayList<>();
+        if (result.getSteps() != null) {
+            for (ReactStep step : result.getSteps()) {
+                summaries.add(buildStepSummary(step));
+            }
+        }
+        Long durationMs = result.getStartedAt() != null && result.getFinishedAt() != null
+                ? Math.max(0L, Duration.between(result.getStartedAt(), result.getFinishedAt()).toMillis())
+                : null;
+        return ReactProcessTelemetry.builder()
+                .exitReason(result.getExitReason() != null ? result.getExitReason().name() : null)
+                .stepCount(result.getSteps() != null ? result.getSteps().size() : 0)
+                .totalToolCalls(result.getTotalToolCalls())
+                .maxSteps(policy.getMaxSteps())
+                .maxToolCalls(policy.getMaxToolCalls())
+                .llmTimeoutMs(policy.getLlmTimeoutMs())
+                .startedAt(result.getStartedAt())
+                .finishedAt(result.getFinishedAt())
+                .durationMs(durationMs)
+                .errorMessage(result.getErrorMessage())
+                .steps(summaries)
+                .build();
+    }
+
+    private ReactStepSummary buildStepSummary(ReactStep step) {
+        ReactModelResponse response = step.getModelResponse();
+        List<ReactToolResult> toolResults = step.getToolResults() != null ? step.getToolResults() : List.of();
+        List<String> toolNames = toolResults.stream()
+                .map(ReactToolResult::getName)
+                .toList();
+        int failedToolCount = (int) toolResults.stream()
+                .filter(ReactToolResult::isFailed)
+                .count();
+        return ReactStepSummary.builder()
+                .index(step.getIndex())
+                .toolCallCount(toolResults.size())
+                .toolNames(toolNames)
+                .failedToolCount(failedToolCount)
+                .hadReasoning(response != null && response.getReasoning() != null
+                        && !response.getReasoning().isBlank())
+                .contentLength(response != null && response.getContent() != null
+                        ? response.getContent().length() : 0)
+                .build();
+    }
+
+    /**
+     * 从 ReAct 执行结果中提取 reasoning/usage/toolCalls 写入 TurnTelemetry，
+     * 补全 ReAct 路径下被绕过的 ChatModelPortImpl 采集逻辑。
+     *
+     * <p>Reasoning：取最后一步（最终答案）的思维链，与直接流式路径行为一致。
+     * <p>Usage：累加所有步骤的 token 用量（ReAct 循环可能多次调用模型）。
+     * <p>ToolCalls：从 ReactToolResult 构建（含 durationMs/serverName/toolType，
+     * 由 ToolExecutorPortImpl.executeWithMetadata 采集，不依赖 ThreadLocal）。
+     */
+    private void populateTelemetryFromReact(TurnTelemetry telemetry, ReactExecutionResult result) {
+        if (telemetry == null || result == null || result.getSteps() == null) {
+            return;
+        }
+
+        // 1. Reasoning content — 取最后一步的 reasoning（最终答案的思维链）
+        ReactStep lastStep = result.getSteps().isEmpty()
+                ? null : result.getSteps().get(result.getSteps().size() - 1);
+        ReactModelResponse lastResponse = lastStep != null ? lastStep.getModelResponse() : null;
+        String reasoning = lastResponse != null ? lastResponse.getReasoning() : null;
+        if (reasoning != null && !reasoning.isBlank()) {
+            telemetry.setReasoningStatus(ReasoningContentStatus.STABLE);
+            boolean truncated = reasoning.length() > MessageMetadataPolicy.MAX_REASONING_CONTENT_LENGTH;
+            telemetry.setReasoningContent(truncated
+                    ? reasoning.substring(0, MessageMetadataPolicy.MAX_REASONING_CONTENT_LENGTH) : reasoning);
+            telemetry.setReasoningContentTruncated(truncated);
+            telemetry.setReasoningNote("已从 ReAct 最终步骤捕获 reasoning_content");
+        } else {
+            telemetry.setReasoningStatus(ReasoningContentStatus.UNSTABLE);
+            telemetry.setReasoningNote("ReAct 路径：最终步骤未返回 reasoning_content");
+        }
+
+        // 2. Usage metrics — 累加所有步骤的 token 用量
+        long promptTokens = 0L;
+        long completionTokens = 0L;
+        long totalTokens = 0L;
+        boolean hasUsage = false;
+        for (ReactStep step : result.getSteps()) {
+            ReactModelResponse response = step.getModelResponse();
+            if (response != null && response.getUsage() != null) {
+                ChatUsageMetrics u = response.getUsage();
+                if (u.getPromptTokens() != null) { promptTokens += u.getPromptTokens(); hasUsage = true; }
+                if (u.getCompletionTokens() != null) { completionTokens += u.getCompletionTokens(); hasUsage = true; }
+                if (u.getTotalTokens() != null) { totalTokens += u.getTotalTokens(); hasUsage = true; }
+            }
+        }
+        if (hasUsage) {
+            telemetry.setUsage(ChatUsageMetrics.builder()
+                    .promptTokens(promptTokens)
+                    .completionTokens(completionTokens)
+                    .totalTokens(totalTokens)
+                    .build());
+        }
+
+        // 3. Tool calls — 从所有步骤的 ReactToolResult 构建遥测条目
+        //    先清空，避免 TelemetryToolCallback 在同线程时可能产生的重复
+        telemetry.getToolCalls().clear();
+        for (ReactStep step : result.getSteps()) {
+            if (step.getToolResults() == null) continue;
+            for (ReactToolResult toolResult : step.getToolResults()) {
+                telemetry.getToolCalls().add(ToolCallTelemetry.builder()
+                        .toolName(toolResult.getName())
+                        .toolType(toolResult.getToolType() != null ? toolResult.getToolType() : "function")
+                        .serverName(toolResult.getServerName())
+                        .inputPreview(truncate(toolResult.getArguments(), MessageMetadataPolicy.MAX_TOOL_PREVIEW_LENGTH))
+                        .outputPreview(truncate(toolResult.getOutput(), MessageMetadataPolicy.MAX_TOOL_PREVIEW_LENGTH))
+                        .durationMs(toolResult.getDurationMs())
+                        .success(!toolResult.isFailed())
+                        .errorType(toolResult.isFailed() ? "RuntimeException" : null)
+                        .errorMessage(toolResult.isFailed()
+                                ? truncate(toolResult.getOutput(), MessageMetadataPolicy.MAX_ERROR_MESSAGE_LENGTH)
+                                : null)
+                        .build());
+            }
+        }
+    }
+
+    private ReactExecutionPolicy resolveReactPolicy(AgentRuntime runtime) {
+        ModuleConfig moduleConfig = runtime.getConfig() != null ? runtime.getConfig().getModule() : null;
+        ModuleConfig.ReactConfig reactConfig = moduleConfig != null ? moduleConfig.getReact() : null;
+        return ReactExecutionPolicy.builder()
+                .maxSteps(reactConfig != null && reactConfig.getMaxSteps() != null
+                        ? reactConfig.getMaxSteps() : ReactExecutionPolicy.DEFAULT_MAX_STEPS)
+                .maxToolCalls(reactConfig != null && reactConfig.getMaxToolCalls() != null
+                        ? reactConfig.getMaxToolCalls() : ReactExecutionPolicy.DEFAULT_MAX_TOOL_CALLS)
+                .llmTimeoutMs(reactConfig != null && reactConfig.getLlmTimeoutMs() != null
+                        ? reactConfig.getLlmTimeoutMs() : ReactExecutionPolicy.DEFAULT_LLM_TIMEOUT_MS)
+                .build();
+    }
+
+    private boolean isReactEnabled(AgentRuntime runtime) {
+        ModuleConfig moduleConfig = runtime.getConfig() != null ? runtime.getConfig().getModule() : null;
+        ModuleConfig.ObservabilityConfig observabilityConfig = moduleConfig != null
+                ? moduleConfig.getObservability() : null;
+        return observabilityConfig != null && Boolean.TRUE.equals(observabilityConfig.getReactEnabled());
     }
 
     /**

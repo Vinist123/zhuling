@@ -44,6 +44,9 @@ public class TurnTelemetry {
     @Builder.Default
     private List<ToolCallTelemetry> toolCalls = new ArrayList<>();
 
+    /** ReAct 执行过程级观测摘要（仅当本轮走了 ReAct 内核时非空） */
+    private ReactProcessTelemetry reactProcess;
+
     /** 是否允许发布 reasoning SSE 事件（null/true = 允许，false = 禁止） */
     private Boolean reasoningContentEnabled;
 

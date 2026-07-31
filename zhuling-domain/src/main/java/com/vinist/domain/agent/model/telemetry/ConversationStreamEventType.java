@@ -11,7 +11,10 @@ public enum ConversationStreamEventType {
     TOOL_STARTED("tool.started"),
     TOOL_COMPLETED("tool.completed"),
     TURN_COMPLETED("turn.completed"),
-    TURN_FAILED("turn.failed");
+    TURN_FAILED("turn.failed"),
+    AGENT_STEP_STARTED("agent.step.started"),
+    AGENT_STEP_COMPLETED("agent.step.completed"),
+    AGENT_LOOP_COMPLETED("agent.loop.completed");
 
     private final String wireName;
 

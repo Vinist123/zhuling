@@ -9,6 +9,8 @@ import com.vinist.domain.agent.model.ChatTargetType;
 import com.vinist.domain.agent.model.telemetry.ChatContextMetrics;
 import com.vinist.domain.agent.model.telemetry.ChatUsageMetrics;
 import com.vinist.domain.agent.model.telemetry.ReasoningContentStatus;
+import com.vinist.domain.agent.model.telemetry.ReactProcessTelemetry;
+import com.vinist.domain.agent.model.telemetry.ReactStepSummary;
 import com.vinist.domain.agent.model.telemetry.ToolCallTelemetry;
 import com.vinist.domain.agent.model.telemetry.TurnTelemetry;
 import com.vinist.domain.agent.service.IAgentRuntimeRegistry;
@@ -123,6 +125,7 @@ public class MessageMetadataCollectorImpl implements IMessageMetadataCollector {
         metadata.put(MessageMetadataKeys.TOOL_CALLS,
                 Boolean.FALSE.equals(observabilityConfig != null ? observabilityConfig.getToolCallEnabled() : null)
                         ? null : createToolCalls(telemetry));
+        metadata.put(MessageMetadataKeys.REACT, createReact(telemetry, observabilityConfig));
         return metadata;
     }
 
@@ -247,6 +250,48 @@ public class MessageMetadataCollectorImpl implements IMessageMetadataCollector {
             toolCalls.add(item);
         }
         return toolCalls;
+    }
+
+    private Map<String, Object> createReact(TurnTelemetry telemetry, ModuleConfig.ObservabilityConfig observabilityConfig) {
+        boolean reactEnabled = observabilityConfig != null && Boolean.TRUE.equals(observabilityConfig.getReactEnabled());
+        ReactProcessTelemetry react = telemetry != null ? telemetry.getReactProcess() : null;
+        if (!reactEnabled || react == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> reactSection = new LinkedHashMap<>();
+        reactSection.put(MessageMetadataKeys.REACT_EXIT_REASON, react.getExitReason());
+        reactSection.put(MessageMetadataKeys.REACT_STEP_COUNT, react.getStepCount());
+        reactSection.put(MessageMetadataKeys.REACT_TOTAL_TOOL_CALLS, react.getTotalToolCalls());
+        reactSection.put(MessageMetadataKeys.REACT_MAX_STEPS, react.getMaxSteps());
+        reactSection.put(MessageMetadataKeys.REACT_MAX_TOOL_CALLS, react.getMaxToolCalls());
+        reactSection.put(MessageMetadataKeys.REACT_LLM_TIMEOUT_MS, react.getLlmTimeoutMs());
+        reactSection.put(MessageMetadataKeys.REACT_STARTED_AT,
+                react.getStartedAt() != null ? react.getStartedAt().toString() : null);
+        reactSection.put(MessageMetadataKeys.REACT_FINISHED_AT,
+                react.getFinishedAt() != null ? react.getFinishedAt().toString() : null);
+        reactSection.put(MessageMetadataKeys.REACT_DURATION_MS, react.getDurationMs());
+        reactSection.put(MessageMetadataKeys.REACT_ERROR_MESSAGE,
+                truncate(react.getErrorMessage(), MessageMetadataPolicy.MAX_ERROR_MESSAGE_LENGTH));
+        reactSection.put(MessageMetadataKeys.REACT_STEPS, createReactSteps(react.getSteps()));
+        return reactSection;
+    }
+
+    private List<Map<String, Object>> createReactSteps(List<ReactStepSummary> steps) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        if (steps == null) {
+            return list;
+        }
+        for (ReactStepSummary step : steps) {
+            LinkedHashMap<String, Object> item = new LinkedHashMap<>();
+            item.put(MessageMetadataKeys.REACT_STEP_INDEX, step.getIndex());
+            item.put(MessageMetadataKeys.REACT_STEP_TOOL_CALL_COUNT, step.getToolCallCount());
+            item.put(MessageMetadataKeys.REACT_STEP_TOOL_NAMES, step.getToolNames());
+            item.put(MessageMetadataKeys.REACT_STEP_FAILED_TOOL_COUNT, step.getFailedToolCount());
+            item.put(MessageMetadataKeys.REACT_STEP_HAD_REASONING, step.isHadReasoning());
+            item.put(MessageMetadataKeys.REACT_STEP_CONTENT_LENGTH, step.getContentLength());
+            list.add(item);
+        }
+        return list;
     }
 
     private String truncate(String value, int maxLength) {

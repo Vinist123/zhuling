@@ -26,6 +26,7 @@ public final class MessageMetadataKeys {
     public static final String CONTEXT = "context";
     public static final String REASONING = "reasoning";
     public static final String TOOL_CALLS = "toolCalls";
+    public static final String REACT = "react";
     public static final String TIMING = "timing";
     public static final String PAYLOAD = "payload";
     public static final String USAGE = "usage";
@@ -77,5 +78,24 @@ public final class MessageMetadataKeys {
     public static final String TOOL_OUTPUT_PREVIEW = "outputPreview";
     public static final String TOOL_DURATION_MS = "durationMs";
     public static final String TOOL_SUCCESS = "success";
+
+    // ---- react 过程级观测 ----
+    public static final String REACT_EXIT_REASON = "exitReason";
+    public static final String REACT_STEP_COUNT = "stepCount";
+    public static final String REACT_TOTAL_TOOL_CALLS = "totalToolCalls";
+    public static final String REACT_MAX_STEPS = "maxSteps";
+    public static final String REACT_MAX_TOOL_CALLS = "maxToolCalls";
+    public static final String REACT_LLM_TIMEOUT_MS = "llmTimeoutMs";
+    public static final String REACT_STARTED_AT = "startedAt";
+    public static final String REACT_FINISHED_AT = "finishedAt";
+    public static final String REACT_DURATION_MS = "durationMs";
+    public static final String REACT_ERROR_MESSAGE = "errorMessage";
+    public static final String REACT_STEPS = "steps";
+    public static final String REACT_STEP_INDEX = "index";
+    public static final String REACT_STEP_TOOL_CALL_COUNT = "toolCallCount";
+    public static final String REACT_STEP_TOOL_NAMES = "toolNames";
+    public static final String REACT_STEP_FAILED_TOOL_COUNT = "failedToolCount";
+    public static final String REACT_STEP_HAD_REASONING = "hadReasoning";
+    public static final String REACT_STEP_CONTENT_LENGTH = "contentLength";
 
 }
