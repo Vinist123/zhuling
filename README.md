@@ -1,5 +1,8 @@
 # 铸灵 ZhuLing
 
+[🌐 English](README_EN.md) | [中文](README.md)
+
+
 > 铸造 AI 灵魂 —— 基于 SpringBoot 4.1 + Spring AI 2.0 + DDD 六边形架构的 AI Agent 开发脚手架
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
