@@ -314,6 +314,9 @@ public class ChatServiceImpl implements IChatService {
             populateTelemetryFromReact(telemetry, result);
         }
         if (result.getExitReason() != ReactExitReason.COMPLETED) {
+            if (result.getFinalAnswer() != null && !result.getFinalAnswer().isBlank()) {
+                return result.getFinalAnswer();
+            }
             throw new IllegalStateException("ReAct 执行未完成: " + result.getExitReason()
                     + (result.getErrorMessage() != null ? ", " + result.getErrorMessage() : ""));
         }
@@ -358,6 +361,9 @@ public class ChatServiceImpl implements IChatService {
                 })
                 .flatMapMany(result -> {
                     if (result.getExitReason() != ReactExitReason.COMPLETED) {
+                        if (result.getFinalAnswer() != null && !result.getFinalAnswer().isBlank()) {
+                            return Flux.fromStream(splitToChunks(result.getFinalAnswer()));
+                        }
                         return Flux.error(new IllegalStateException("ReAct 执行未完成: " + result.getExitReason()
                                 + (result.getErrorMessage() != null ? ", " + result.getErrorMessage() : "")));
                     }

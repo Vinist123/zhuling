@@ -5,11 +5,15 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * 为已配置的 Skill 包创建 Spring AI 工具回调。
@@ -38,7 +42,8 @@ public class SkillToolCallbackFactory {
                 .build();
         ToolCallback executeSkillCallback = FunctionToolCallback
                 .builder("execute_skill_script", (ExecuteSkillScriptRequest request) -> executeSkillScript(skillPackages, request))
-                .description("执行已加载 Skill 包内的 Python 或 Shell 脚本，文件参数使用 workspace:相对路径")
+                .description("执行已加载 Skill 包内的 Python 或 Shell 脚本，文件参数使用 workspace:相对路径。"
+                        + "⚠️ 调用前必须先调用 load_skill 获取可用脚本清单，禁止猜测 scriptPath。")
                 .inputType(ExecuteSkillScriptRequest.class)
                 .build();
         return new ToolCallback[]{loadSkillCallback, executeSkillCallback};
@@ -72,9 +77,12 @@ public class SkillToolCallbackFactory {
         if (skillPackage == null) {
             throw new IllegalArgumentException("当前 Agent 未配置 Skill: " + request.name());
         }
+        String scriptsListing = listAvailableScripts(skillPackage);
         return "Skill: " + skillPackage.name() + "\n\n"
                 + skillPackage.instructions()
-                + "\n\n执行约束：调用 execute_skill_script 时仅使用本 Skill 包内的 .py 或 .sh 相对路径；"
+                + "\n\n可用脚本清单（仅以下路径可传给 execute_skill_script 的 scriptPath）：\n"
+                + scriptsListing
+                + "\n执行约束：调用 execute_skill_script 时仅使用上述脚本路径，禁止猜测；"
                 + "所有外部文件参数必须使用 workspace:<相对路径>。";
     }
 
@@ -102,5 +110,33 @@ public class SkillToolCallbackFactory {
     }
 
     public record ExecuteSkillScriptRequest(String skillName, String scriptPath, List<String> arguments) {
+    }
+
+    private String listAvailableScripts(ResolvedSkillPackage skillPackage) {
+        Path scriptsDir = skillPackage.packageRoot().resolve("scripts");
+        if (!Files.isDirectory(scriptsDir)) {
+            return "  (无 scripts 目录)";
+        }
+        List<String> scripts = new ArrayList<>();
+        try (Stream<Path> stream = Files.walk(scriptsDir)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(p -> {
+                        String name = p.getFileName().toString();
+                        return name.endsWith(".py") || name.endsWith(".sh");
+                    })
+                    .forEach(p -> scripts.add(scriptsDir.relativize(p)
+                            .toString().replace('\\', '/')));
+        } catch (IOException e) {
+            return "  (扫描 scripts 目录失败: " + e.getMessage() + ")";
+        }
+        if (scripts.isEmpty()) {
+            return "  (scripts 目录无 .py 或 .sh 文件)";
+        }
+        Collections.sort(scripts);
+        StringBuilder sb = new StringBuilder();
+        for (String script : scripts) {
+            sb.append("  - scripts/").append(script).append("\n");
+        }
+        return sb.toString().stripTrailing();
     }
 }

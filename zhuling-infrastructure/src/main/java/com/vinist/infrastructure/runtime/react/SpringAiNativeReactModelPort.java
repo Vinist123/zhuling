@@ -4,6 +4,7 @@ import com.vinist.domain.agent.adapter.port.IReactModelPort;
 import com.vinist.domain.agent.model.entity.MessageEntity;
 import com.vinist.domain.agent.model.react.ReactExecutionContext;
 import com.vinist.domain.agent.model.react.ReactExecutionRequest;
+import com.vinist.domain.agent.model.react.ReactModelChunk;
 import com.vinist.domain.agent.model.react.ReactModelResponse;
 import com.vinist.domain.agent.model.react.ReactStep;
 import com.vinist.domain.agent.model.react.ReactToolCall;
@@ -16,8 +17,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,12 +40,38 @@ public class SpringAiNativeReactModelPort implements IReactModelPort {
     }
 
     @Override
-    public Mono<ReactModelResponse> call(ReactExecutionRequest request, ReactExecutionContext context) {
-        return Mono.fromCallable(() -> {
-                    ChatResponse response = chatModel.call(new Prompt(buildMessages(request, context)));
-                    return toResponse(response);
-                })
-                .subscribeOn(Schedulers.boundedElastic());
+    public Flux<ReactModelChunk> stream(ReactExecutionRequest request, ReactExecutionContext context) {
+        List<Message> messages = buildMessages(request, context);
+        return chatModel.stream(new Prompt(messages))
+                .map(this::toChunk);
+    }
+
+    /**
+     * 将单个流式 ChatResponse 转换为 ReactModelChunk。
+     *
+     * <p>reasoning 为累积式快照（取最后一个非空即可）；
+     * content 为增量片段（聚合时拼接）；
+     * toolCalls 由 SpringAI 合并为完整列表（聚合时取最后一个非空）。</p>
+     */
+    private ReactModelChunk toChunk(ChatResponse response) {
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
+            return ReactModelChunk.builder().build();
+        }
+        AssistantMessage output = response.getResult().getOutput();
+        return ReactModelChunk.builder()
+                .contentDelta(output.getText())
+                .reasoning(extractReasoning(output.getMetadata()))
+                .toolCalls(output.getToolCalls() != null
+                        ? output.getToolCalls().stream()
+                                .map(toolCall -> ReactToolCall.builder()
+                                        .id(toolCall.id())
+                                        .name(toolCall.name())
+                                        .arguments(toolCall.arguments())
+                                        .build())
+                                .toList()
+                        : List.of())
+                .usage(extractUsage(response))
+                .build();
     }
 
     private List<Message> buildMessages(ReactExecutionRequest request, ReactExecutionContext context) {
@@ -105,25 +131,6 @@ public class SpringAiNativeReactModelPort implements IReactModelPort {
 
     private ToolResponseMessage.ToolResponse toToolResponse(ReactToolResult result) {
         return new ToolResponseMessage.ToolResponse(result.getId(), result.getName(), result.getOutput());
-    }
-
-    private ReactModelResponse toResponse(ChatResponse response) {
-        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            throw new IllegalStateException("模型未返回有效响应");
-        }
-        AssistantMessage output = response.getResult().getOutput();
-        return ReactModelResponse.builder()
-                .content(output.getText())
-                .reasoning(extractReasoning(output.getMetadata()))
-                .toolCalls(output.getToolCalls().stream()
-                        .map(toolCall -> ReactToolCall.builder()
-                                .id(toolCall.id())
-                                .name(toolCall.name())
-                                .arguments(toolCall.arguments())
-                                .build())
-                        .toList())
-                .usage(extractUsage(response))
-                .build();
     }
 
     private com.vinist.domain.agent.model.telemetry.ChatUsageMetrics extractUsage(ChatResponse response) {

@@ -11,6 +11,25 @@
 
 - Phase 8 多 Agent 协同（规划中）
 
+## [Phase 7.5] - 2026-08-14
+
+> ReAct 推理过程从「步骤级实时」升级为「逐 token 增量流式」，观感对齐原生流式路径。
+
+### Added
+
+- **流式模型 chunk 模型 `ReactModelChunk`**：新增 ReAct 模型流式产出的单 chunk 表示，含累积式 `reasoning` 快照、增量 `contentDelta`、合并后的 `toolCalls`、`usage`；内置 `aggregate(List)` 将 chunk 列表聚合为完整 `ReactModelResponse`。
+- **`IReactModelPort.stream()` 流式契约**：端口新增 `Flux<ReactModelChunk> stream(...)` 为核心方法；`call()` 降级为默认实现（聚合 stream 结果），同步路径零改动复用。
+
+### Changed
+
+- **`SpringAiNativeReactModelPort`**：`chatModel.call()`（同步整段）改为 `chatModel.stream()`（逐 chunk），每个 `ChatResponse` 转 `ReactModelChunk`；移除冗余的 `toResponse()`，`extractReasoning` / `extractUsage` 复用。
+- **`ReactExecutor.executeNext`**：模型调用从 `call().map()` 改为 `stream().doOnNext(透传).collectList().map(aggregate)`——逐 chunk 调 `publishReasoningDelta`（累积快照，内部自动算增量）实现逐 token 实时推送，末尾聚合后走原有循环决策（工具判断 / 结果回灌 / 预算控制不变）。
+- **`publishStepCompleted` 兜底**：原「整段补发 reasoning」改为去重安全网（流式已逐 token 推过，`reasoningSnapshot` 去重为 no-op），并补齐 `reasoningContentEnabled` 开关检查。
+
+### Resolved
+
+- ~~**ReAct 模式流式观感为「步骤级实时」而非「逐 token 增量」**~~：已通过 `IReactModelPort` 契约从 `Mono` 升级为 `Flux` 解决。增量展示与循环决策解耦——`tool_calls` 在响应末尾，循环本就需等完整响应才决策（不变）；增量只优化推理过程的实时透传，不动控制流。SSE 事件信封语义不变，前端 `reasoning.delta` 处理逻辑无需改动。
+
 ## [Phase 7] - 2026-07-31
 
 > 单 Agent ReAct 执行内核正式落地，可观测对话工作台支持实时步骤轨迹。
@@ -33,7 +52,7 @@
 
 ### Known Issues
 
-- **ReAct 模式流式观感为「步骤级实时」而非「逐 token 增量」**：开启 `react-enabled` 后，`IReactModelPort.call()` 以 `Mono<ReactModelResponse>` 一次性返回整段推理，前端在每个 Step 结束时整段补发 `reasoning.delta`，观感上比关闭 ReAct（走 `ChatModelPort.stream()` 原生逐字流）显得「卡顿、无流式」。该问题仅影响观感、不改变 ReAct 循环速度，已记录于 `docs/DEVELOPMENT_PLAN.md` Phase 7「后续优化」项，建议作为独立 Enhancement 排期（将 `call()` 升级为 `Flux` 增量推送）。
+- ~~**ReAct 模式流式观感为「步骤级实时」而非「逐 token 增量」**~~：已于 Phase 7.5（2026-08-14）解决，见上文 `[Phase 7.5]` 段。
 
 ## [Phase 6.6] - 2026-07 (基线)
 

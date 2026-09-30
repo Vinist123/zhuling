@@ -8,6 +8,7 @@ import com.vinist.domain.agent.model.react.ReactExecutionPolicy;
 import com.vinist.domain.agent.model.react.ReactExecutionRequest;
 import com.vinist.domain.agent.model.react.ReactExecutionResult;
 import com.vinist.domain.agent.model.react.ReactExitReason;
+import com.vinist.domain.agent.model.react.ReactModelChunk;
 import com.vinist.domain.agent.model.react.ReactModelResponse;
 import com.vinist.domain.agent.model.react.ReactStep;
 import com.vinist.domain.agent.model.react.ReactToolCall;
@@ -120,6 +121,27 @@ public class ReactExecutor implements IAgentExecutionEngine {
         eventPublisher.publish(telemetry, ConversationStreamEventType.AGENT_STEP_STARTED, payload);
     }
 
+    /**
+     * 流式逐 chunk 透传推理过程：将模型累积式 reasoning 快照传给 publishReasoningDelta，
+     * 由其内部维护快照、自动计算增量并发布 reasoning.delta 事件，实现逐 token 实时推送。
+     *
+     * <p>SpringAI 2.0.x 流式下每个 chunk 的 reasoning 为累积式快照（到目前的完整思维链），
+     * 因此直接传入即可，无需自己算增量。</p>
+     */
+    private void publishReasoningChunk(ReactExecutionRequest request, ReactModelChunk chunk) {
+        TurnTelemetry telemetry = request.getTurnTelemetry();
+        if (telemetry == null) {
+            return;
+        }
+        if (chunk.getReasoning() == null || chunk.getReasoning().isBlank()) {
+            return;
+        }
+        if (Boolean.FALSE.equals(telemetry.getReasoningContentEnabled())) {
+            return;
+        }
+        eventPublisher.publishReasoningDelta(telemetry, chunk.getReasoning());
+    }
+
     private void publishStepCompleted(ReactExecutionRequest request,
                                       int stepIndex,
                                       ReactModelResponse response,
@@ -128,8 +150,10 @@ public class ReactExecutor implements IAgentExecutionEngine {
         if (telemetry == null) {
             return;
         }
-        // 兜底推送本轮 thought：若 ChatModelPort 未逐块发 reasoning.delta，则在此补发完整思维链
-        if (response.getReasoning() != null && !response.getReasoning().isBlank()) {
+        // 安全网：流式期间已由 publishReasoningChunk 逐 token 推送 reasoning.delta，
+        // 此处若再发会被 reasoningSnapshot 去重为 no-op；仅在流式透传遗漏时兜底补发完整思维链
+        if (response.getReasoning() != null && !response.getReasoning().isBlank()
+                && !Boolean.FALSE.equals(telemetry.getReasoningContentEnabled())) {
             eventPublisher.publishReasoningDelta(telemetry, response.getReasoning());
         }
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -202,7 +226,8 @@ public class ReactExecutor implements IAgentExecutionEngine {
                                                     List<ReactStep> completedSteps) {
         ReactExecutionPolicy policy = request.getPolicy();
         if (context.getCurrentStep() > policy.getMaxSteps()) {
-            return Mono.just(result(ReactExitReason.MAX_STEPS_REACHED, null,
+            String fallback = buildBudgetFallback(request, extractLastStepContent(completedSteps), "执行步数");
+            return Mono.just(result(ReactExitReason.MAX_STEPS_REACHED, fallback,
                     context.getTotalToolCalls(), completedSteps, null));
         }
 
@@ -226,8 +251,11 @@ public class ReactExecutor implements IAgentExecutionEngine {
                 .build();
 
         return nodeInterceptorChain.around(modelNodeContext, ctx ->
-                        reactModelPort.call(request, modelContext)
+                        reactModelPort.stream(request, modelContext)
                                 .timeout(Duration.ofMillis(policy.getLlmTimeoutMs()))
+                                .doOnNext(chunk -> publishReasoningChunk(request, chunk))
+                                .collectList()
+                                .map(ReactModelChunk::aggregate)
                                 .map(response -> ReactNodeOutcome.builder()
                                         .nodeType(ReactNodeContext.NodeType.MODEL)
                                         .stepIndex(context.getCurrentStep())
@@ -261,7 +289,8 @@ public class ReactExecutor implements IAgentExecutionEngine {
         }
         int nextToolCallCount = context.getTotalToolCalls() + toolCallCount;
         if (nextToolCallCount > request.getPolicy().getMaxToolCalls()) {
-            return Mono.just(result(ReactExitReason.MAX_TOOL_CALLS_REACHED, null,
+            String fallback = buildBudgetFallback(request, response.getContent(), "工具调用");
+            return Mono.just(result(ReactExitReason.MAX_TOOL_CALLS_REACHED, fallback,
                     context.getTotalToolCalls(), steps, null));
         }
 
@@ -339,6 +368,28 @@ public class ReactExecutor implements IAgentExecutionEngine {
         java.util.ArrayList<ReactStep> steps = new java.util.ArrayList<>(completedSteps);
         steps.add(step);
         return List.copyOf(steps);
+    }
+
+    private String extractLastStepContent(List<ReactStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            return null;
+        }
+        ReactStep last = steps.get(steps.size() - 1);
+        if (last.getModelResponse() != null) {
+            return last.getModelResponse().getContent();
+        }
+        return null;
+    }
+
+    private String buildBudgetFallback(ReactExecutionRequest request, String lastContent, String budgetType) {
+        int limit = "工具调用".equals(budgetType)
+                ? request.getPolicy().getMaxToolCalls()
+                : request.getPolicy().getMaxSteps();
+        if (lastContent != null && !lastContent.isBlank()) {
+            return lastContent + "\n\n（提示：已达到" + budgetType + "上限 " + limit + "，以上为基于已有信息的回答）";
+        }
+        return "抱歉，我已达到" + budgetType + "上限（" + limit + "），暂时无法完成这个任务。"
+                + "请尝试简化问题或换一种方式提问。";
     }
 
     private ReactExecutionResult result(ReactExitReason reason,
