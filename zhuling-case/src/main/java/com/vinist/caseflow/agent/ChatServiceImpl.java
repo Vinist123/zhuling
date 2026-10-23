@@ -24,12 +24,17 @@ import com.vinist.domain.agent.model.telemetry.ReactProcessTelemetry;
 import com.vinist.domain.agent.model.telemetry.ReactStepSummary;
 import com.vinist.domain.agent.model.telemetry.TurnTelemetry;
 import com.vinist.domain.agent.model.telemetry.ToolCallTelemetry;
+import com.vinist.domain.agent.model.workflow.WorkflowExecutionResult;
+import com.vinist.domain.agent.model.workflow.WorkflowExitReason;
+import com.vinist.domain.agent.model.workflow.WorkflowRuntime;
 import com.vinist.domain.agent.service.IAgentRuntimeRegistry;
 import com.vinist.domain.agent.service.IChatService;
 import com.vinist.domain.agent.service.IConversationStreamEventPublisher;
 import com.vinist.domain.agent.service.IMessageMetadataCollector;
 import com.vinist.domain.agent.service.ISessionService;
 import com.vinist.domain.agent.service.ITurnTelemetryService;
+import com.vinist.domain.agent.service.IWorkflowConfigService;
+import com.vinist.domain.agent.service.IWorkflowScheduler;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -61,25 +66,34 @@ public class ChatServiceImpl implements IChatService {
     private final IAgentRuntimeRegistry agentRuntimeRegistry;
     private final IConversationStreamEventPublisher eventPublisher;
     private final IAgentExecutionEngine agentExecutionEngine;
+    private final IWorkflowConfigService workflowConfigService;
+    private final IWorkflowScheduler workflowScheduler;
 
     public ChatServiceImpl(ISessionService sessionService,
                            IMessageMetadataCollector messageMetadataCollector,
                            ITurnTelemetryService turnTelemetryService,
                            IAgentRuntimeRegistry agentRuntimeRegistry,
                            IConversationStreamEventPublisher eventPublisher,
-                           IAgentExecutionEngine agentExecutionEngine) {
+                           IAgentExecutionEngine agentExecutionEngine,
+                           IWorkflowConfigService workflowConfigService,
+                           IWorkflowScheduler workflowScheduler) {
         this.sessionService = sessionService;
         this.messageMetadataCollector = messageMetadataCollector;
         this.turnTelemetryService = turnTelemetryService;
         this.agentRuntimeRegistry = agentRuntimeRegistry;
         this.eventPublisher = eventPublisher;
         this.agentExecutionEngine = agentExecutionEngine;
+        this.workflowConfigService = workflowConfigService;
+        this.workflowScheduler = workflowScheduler;
     }
 
     @Override
     public String chat(String sessionId, String message) {
         log.info("执行聊天: sessionId={}, message={}", sessionId, message);
         SessionEntity session = loadSession(sessionId);
+        if (isWorkflowSession(session)) {
+            return workflowChat(session, message);
+        }
         AgentRuntime runtime = getRuntime(session);
         long startedAtMs = System.currentTimeMillis();
 
@@ -118,13 +132,17 @@ public class ChatServiceImpl implements IChatService {
                 .flatMapMany(session -> {
                     long startedAtMs = System.currentTimeMillis();
                     StringBuilder assistantContent = new StringBuilder();
-                    AgentRuntime runtime = getRuntime(session);
+                    boolean workflowMode = isWorkflowSession(session);
+                    WorkflowRuntime workflowRuntime = workflowMode
+                            ? workflowConfigService.getRequired(session.getTargetId()) : null;
+                    AgentRuntime runtime = workflowMode ? null : getRuntime(session);
 
                     return sessionService.getMessages(sessionId)
                             .collectList()
                             .flatMapMany(availableHistory -> {
-                                String systemPrompt = getSystemPrompt(runtime);
-                                List<MessageEntity> history = limitHistory(availableHistory, runtime);
+                                String systemPrompt = workflowMode ? null : getSystemPrompt(runtime);
+                                List<MessageEntity> history = workflowMode
+                                        ? List.of() : limitHistory(availableHistory, runtime);
                                 String telemetryPrompt = buildTelemetryPrompt(systemPrompt, history, message);
                                 TurnTelemetry turnTelemetry = turnTelemetryService.startTurn(
                                         session.getId(), session.getTargetId(), true, availableHistory.size(), message);
@@ -133,13 +151,17 @@ public class ChatServiceImpl implements IChatService {
                                 applyObservabilityFlags(turnTelemetry, runtime);
                                 eventPublisher.open(turnTelemetry);
                                 eventPublisher.publish(turnTelemetry, ConversationStreamEventType.TURN_STARTED,
-                                        buildTurnStartedPayload(session, runtime, turnTelemetry));
+                                        workflowMode
+                                                ? buildWorkflowTurnStartedPayload(session, workflowRuntime, turnTelemetry)
+                                                : buildTurnStartedPayload(session, runtime, turnTelemetry));
                                 turnTelemetryService.bindCurrentTurn(turnTelemetry);
                                 MessageEntity userMessage = buildUserMessage(session, message, true, turnTelemetry);
 
                                 Flux<ConversationStreamEvent> execution = sessionService.saveMessage(userMessage)
                                         .thenMany(
-                                                isReactEnabled(runtime)
+                                                workflowMode
+                                                        ? emitWorkflowStream(workflowRuntime, message, turnTelemetry)
+                                                        : isReactEnabled(runtime)
                                                         ? emitReactStream(runtime, systemPrompt, history, message, turnTelemetry)
                                                         : runtime.getChatModelPort().stream(systemPrompt, history, message, turnTelemetry)
                                         )
@@ -235,6 +257,10 @@ public class ChatServiceImpl implements IChatService {
     }
 
     private Integer resolveContextWindowTokens(AgentRuntime runtime) {
+        // Workflow 会话没有 AgentRuntime（多节点各自携带配置），此处返回 null
+        if (runtime == null) {
+            return null;
+        }
         ModuleConfig moduleConfig = runtime.getConfig() != null ? runtime.getConfig().getModule() : null;
         ModuleConfig.ContextConfig contextConfig = moduleConfig != null ? moduleConfig.getContext() : null;
         return contextConfig != null ? contextConfig.getContextWindowTokens() : null;
@@ -382,6 +408,86 @@ public class ChatServiceImpl implements IChatService {
             chunks.add(text.substring(i, Math.min(i + REACT_STREAM_CHUNK_SIZE, text.length())));
         }
         return chunks.stream();
+    }
+
+    private boolean isWorkflowSession(SessionEntity session) {
+        return session.getTargetType() == ChatTargetType.WORKFLOW;
+    }
+
+    /** Workflow 同步路径：调度执行 + 终态输出（含优雅降级语义） */
+    private String workflowChat(SessionEntity session, String message) {
+        WorkflowRuntime workflowRuntime = workflowConfigService.getRequired(session.getTargetId());
+        long startedAtMs = System.currentTimeMillis();
+        TurnTelemetry turnTelemetry = turnTelemetryService.startTurn(
+                session.getId(), session.getTargetId(), false, 0, message);
+        turnTelemetryService.updateContext(
+                turnTelemetry, 0, 1, buildTelemetryPrompt(null, List.of(), message), null);
+        turnTelemetryService.bindCurrentTurn(turnTelemetry);
+        try {
+            persistMessage(buildUserMessage(session, message, false, turnTelemetry));
+            WorkflowExecutionResult result = workflowScheduler
+                    .execute(workflowRuntime, message, turnTelemetry)
+                    .blockOptional()
+                    .orElseThrow(() -> new IllegalStateException("Workflow 执行未返回结果"));
+            String response = resolveWorkflowOutput(result);
+            persistMessage(buildAssistantMessage(session, response, false, startedAtMs, null, turnTelemetry));
+            return response;
+        } catch (RuntimeException ex) {
+            persistMessage(buildAssistantMessage(session, "", false, startedAtMs, ex, turnTelemetry));
+            throw ex;
+        } finally {
+            turnTelemetryService.clearCurrentTurn();
+        }
+    }
+
+    /**
+     * Workflow 流式路径：调度执行期间 workflow.node.* / reasoning.delta /
+     * agent.step.* 事件经 eventPublisher 实时推送；终态输出拆块回放为 Flux&lt;String&gt;，
+     * 复用现有流式管道（materialize → handleStreamSignal → onErrorResume）。
+     */
+    private Flux<String> emitWorkflowStream(WorkflowRuntime workflowRuntime,
+                                            String message,
+                                            TurnTelemetry telemetry) {
+        return workflowScheduler.execute(workflowRuntime, message, telemetry)
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(result -> {
+                    try {
+                        return Flux.fromStream(splitToChunks(resolveWorkflowOutput(result)));
+                    } catch (RuntimeException ex) {
+                        return Flux.error(ex);
+                    }
+                });
+    }
+
+    /** Workflow 终态输出解析：失败但存在降级输出时降级返回，否则抛异常 */
+    private String resolveWorkflowOutput(WorkflowExecutionResult result) {
+        if (result == null) {
+            throw new IllegalStateException("Workflow 执行未返回结果");
+        }
+        if (result.getExitReason() == WorkflowExitReason.COMPLETED
+                || (result.getFinalOutput() != null && !String.valueOf(result.getFinalOutput()).isBlank())) {
+            return String.valueOf(result.getFinalOutput() != null ? result.getFinalOutput() : "");
+        }
+        throw new IllegalStateException("Workflow 执行未完成: " + result.getExitReason()
+                + (result.getErrorMessage() != null ? ", " + result.getErrorMessage() : ""));
+    }
+
+    private Map<String, Object> buildWorkflowTurnStartedPayload(SessionEntity session,
+                                                                 WorkflowRuntime workflowRuntime,
+                                                                 TurnTelemetry telemetry) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        Map<String, Object> target = new LinkedHashMap<>();
+        target.put("id", session.getTargetId());
+        target.put("type", session.getTargetType() != null ? session.getTargetType().name() : null);
+        payload.put("target", target);
+        payload.put("workflowId", session.getTargetId());
+        payload.put("workflowName",
+                workflowRuntime != null && workflowRuntime.getDefinition() != null
+                        ? workflowRuntime.getDefinition().getName() : null);
+        payload.put("traceId", telemetry.getTraceId());
+        payload.put("requestId", telemetry.getRequestId());
+        payload.put("context", telemetry.getContext());
+        return payload;
     }
 
     private ReactProcessTelemetry buildReactProcess(ReactExecutionResult result, ReactExecutionPolicy policy) {

@@ -27,6 +27,7 @@ public final class MessageMetadataKeys {
     public static final String REASONING = "reasoning";
     public static final String TOOL_CALLS = "toolCalls";
     public static final String REACT = "react";
+    public static final String WORKFLOW = "workflow";
     public static final String TIMING = "timing";
     public static final String PAYLOAD = "payload";
     public static final String USAGE = "usage";
@@ -96,6 +97,23 @@ public final class MessageMetadataKeys {
     public static final String REACT_STEP_TOOL_NAMES = "toolNames";
     public static final String REACT_STEP_FAILED_TOOL_COUNT = "failedToolCount";
     public static final String REACT_STEP_HAD_REASONING = "hadReasoning";
+
+    // ---- workflow 过程级观测 ----
+    public static final String WORKFLOW_EXIT_REASON = "exitReason";
+    public static final String WORKFLOW_NODE_COUNT = "nodeCount";
+    public static final String WORKFLOW_DURATION_MS = "durationMs";
+    public static final String WORKFLOW_ERROR_MESSAGE = "errorMessage";
+    public static final String WORKFLOW_NODES = "nodes";
+    public static final String WORKFLOW_NODE_INDEX = "index";
+    public static final String WORKFLOW_NODE_ID = "nodeId";
+    public static final String WORKFLOW_NODE_NAME = "nodeName";
+    public static final String WORKFLOW_NODE_TYPE = "nodeType";
+    public static final String WORKFLOW_NODE_OUTPUT_PREVIEW = "outputPreview";
+    public static final String WORKFLOW_NODE_ROUTED_TO = "routedToNodeId";
+    public static final String WORKFLOW_NODE_DURATION_MS = "durationMs";
+    public static final String WORKFLOW_NODE_SUCCESS = "success";
+    public static final String WORKFLOW_NODE_ERROR = "error";
+
     public static final String REACT_STEP_CONTENT_LENGTH = "contentLength";
 
 }

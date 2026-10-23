@@ -1,0 +1,37 @@
+id: music-critic-workflow
+name: 音乐点评工作流
+description: 查询歌手歌曲数量，依据查询结果生成点评或走兜底回复（顺序多 Agent 委派 + 条件路由示例）
+entry: query-song-count
+state:
+  artist: 周杰伦
+nodes:
+  - id: query-song-count
+    name: 歌曲数量查询
+    type: AGENT
+    agent-id: music-agent
+    input-template: "查询歌手 ${artist} 一共有几首歌，列出歌名清单并说明总数"
+    output-key: queryResult
+  - id: check-result
+    name: 查询结果检查
+    type: CONDITION
+    component: musicResultCheckCondition
+  - id: write-review
+    name: 生成点评
+    type: AGENT
+    agent-id: music-agent
+    input-template: "根据以下查询结果，写一段 100 字以内的音乐点评，语气亲切可爱：${queryResult}"
+    output-key: review
+  - id: fallback-reply
+    name: 兜底回复
+    type: CODE
+    component: musicFallbackReplier
+    output-key: review
+edges:
+  - from: query-song-count
+    to: check-result
+  - from: check-result
+    to: write-review
+    when: has-result
+  - from: check-result
+    to: fallback-reply
+    when: no-result

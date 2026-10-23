@@ -48,6 +48,14 @@ public class ReactExecutor implements IAgentExecutionEngine {
     private final IConversationStreamEventPublisher eventPublisher;
     private final ReactNodeInterceptorChain nodeInterceptorChain;
 
+    /**
+     * 跨 step 重复调用同一工具时附加到回灌文本的提示：告知模型该查询已执行过、以上为上次结果，
+     * 引导其基于已有信息直接收敛作答，而非反复查询同一目标（防止模型陷入重复调用循环直至超时/耗尽预算）。
+     */
+    private static final String REPEATED_TOOL_HINT =
+            "\n\n（系统提示：该工具已用相同参数执行过，以上为上次的结果。请勿重复调用同一工具，"
+                    + "基于已有信息直接给出回答。）";
+
     public ReactExecutor(IToolExecutorPort toolExecutorPort,
                          IConversationStreamEventPublisher eventPublisher) {
         this.toolExecutorPort = toolExecutorPort;
@@ -278,7 +286,10 @@ public class ReactExecutor implements IAgentExecutionEngine {
                 .toolResults(List.of())
                 .build();
         List<ReactStep> steps = appendStep(completedSteps, step);
-        int toolCallCount = toolCalls.size();
+        // 模型偶尔会在一次响应里返回完全相同的多个 tool_call，去重后只执行一次，
+        // 避免重复消耗 max-tool-calls 预算（结果仍按原始 tool_call id 逐一回填）
+        List<ReactToolCall> uniqueToolCalls = dedupeToolCalls(toolCalls);
+        int toolCallCount = uniqueToolCalls.size();
 
         // 发布 step.completed（thought + 本轮工具意图已确定）
         publishStepCompleted(request, context.getCurrentStep(), response, toolCallCount);
@@ -294,10 +305,45 @@ public class ReactExecutor implements IAgentExecutionEngine {
                     context.getTotalToolCalls(), steps, null));
         }
 
-        // 实时发布工具调用起点（act 阶段），逐个工具在开始执行前推送
-        toolCalls.forEach(toolCall -> publishToolStarted(request, toolCall));
+        // 跨 step 重复调用防护：已完成步骤里用相同 (工具名+入参) 执行过的，直接复用上次结果，
+        // 不再重复执行；回灌文本附加"请勿重复调用"提示，引导模型尽快收敛、打破重复循环
+        Map<String, ReactToolResult> executedCache = collectExecutedResults(completedSteps);
+        List<ReactToolCall> toExecute = new java.util.ArrayList<>();
+        List<ReactToolResult> reusedResults = new java.util.ArrayList<>();
+        for (ReactToolCall toolCall : uniqueToolCalls) {
+            ReactToolResult cached = executedCache.get(toolCallKey(toolCall.getName(), toolCall.getArguments()));
+            if (cached != null) {
+                // 复用：仍发布 started/completed 让前端看到这次调用意图，但不真正执行工具
+                publishToolStarted(request, toolCall);
+                ReactToolResult reused = ReactToolResult.builder()
+                        .id(toolCall.getId())
+                        .name(cached.getName())
+                        .arguments(cached.getArguments())
+                        .output(cached.getOutput() + REPEATED_TOOL_HINT)
+                        .failed(cached.isFailed())
+                        .durationMs(0L)
+                        .serverName(cached.getServerName())
+                        .toolType(cached.getToolType())
+                        .build();
+                publishToolCompleted(request, toolCall, reused);
+                reusedResults.add(reused);
+            } else {
+                toExecute.add(toolCall);
+            }
+        }
+        // 实时发布实际执行工具的调用起点（act 阶段），逐个工具在开始执行前推送
+        toExecute.forEach(toolCall -> publishToolStarted(request, toolCall));
 
-        return executeTools(request, toolCalls)
+        Mono<List<ReactToolResult>> execMono = toExecute.isEmpty()
+                ? Mono.just(List.of())
+                : executeTools(request, toExecute);
+        return execMono
+                .map(execResults -> {
+                    List<ReactToolResult> merged = new java.util.ArrayList<>(execResults);
+                    merged.addAll(reusedResults);
+                    return merged;
+                })
+                .map(uniqueResults -> expandToolResults(toolCalls, uniqueResults))
                 .flatMap(toolResults -> {
                     step.setToolResults(toolResults);
                     ReactExecutionContext nextContext = ReactExecutionContext.builder()
@@ -309,6 +355,70 @@ public class ReactExecutor implements IAgentExecutionEngine {
                             .build();
                     return executeNext(request, reactModelPort, nextContext, steps);
                 });
+    }
+
+    /** 按「工具名 + 入参」去重，保留首次出现的调用（模型偶发重复 tool_call） */
+    private List<ReactToolCall> dedupeToolCalls(List<ReactToolCall> toolCalls) {
+        java.util.Map<String, ReactToolCall> unique = new java.util.LinkedHashMap<>();
+        for (ReactToolCall toolCall : toolCalls) {
+            unique.putIfAbsent(toolCallKey(toolCall.getName(), toolCall.getArguments()), toolCall);
+        }
+        return List.copyOf(unique.values());
+    }
+
+    /**
+     * 汇总已完成步骤里已执行的工具结果，key = 工具名 + 入参。
+     * 用于跨 step 检测重复调用：模型在后续步骤用相同参数再调同一工具时复用上次结果，
+     * 避免无限重复查询（相同入参的本地查询结果稳定，复用安全）。
+     */
+    private Map<String, ReactToolResult> collectExecutedResults(List<ReactStep> completedSteps) {
+        Map<String, ReactToolResult> cache = new LinkedHashMap<>();
+        if (completedSteps == null) {
+            return cache;
+        }
+        for (ReactStep step : completedSteps) {
+            if (step.getToolResults() == null) {
+                continue;
+            }
+            for (ReactToolResult result : step.getToolResults()) {
+                cache.putIfAbsent(toolCallKey(result.getName(), result.getArguments()), result);
+            }
+        }
+        return cache;
+    }
+
+    /**
+     * 将去重后的执行结果按原始 tool_call 列表展开。
+     * 模型协议要求每个 tool_call id 都必须有对应的 tool 消息，因此重复项复用同一结果、仅换 id。
+     */
+    private List<ReactToolResult> expandToolResults(List<ReactToolCall> original,
+                                                    List<ReactToolResult> uniqueResults) {
+        java.util.Map<String, ReactToolResult> byKey = new java.util.HashMap<>();
+        for (ReactToolResult result : uniqueResults) {
+            byKey.putIfAbsent(toolCallKey(result.getName(), result.getArguments()), result);
+        }
+        java.util.List<ReactToolResult> expanded = new java.util.ArrayList<>();
+        for (ReactToolCall toolCall : original) {
+            ReactToolResult result = byKey.get(toolCallKey(toolCall.getName(), toolCall.getArguments()));
+            if (result == null) {
+                continue;
+            }
+            expanded.add(ReactToolResult.builder()
+                    .id(toolCall.getId())
+                    .name(result.getName())
+                    .arguments(result.getArguments())
+                    .output(result.getOutput())
+                    .failed(result.isFailed())
+                    .durationMs(result.getDurationMs())
+                    .serverName(result.getServerName())
+                    .toolType(result.getToolType())
+                    .build());
+        }
+        return expanded;
+    }
+
+    private String toolCallKey(String name, String arguments) {
+        return (name == null ? "" : name) + "|" + (arguments == null ? "" : arguments);
     }
 
     private Mono<List<ReactToolResult>> executeTools(ReactExecutionRequest request, List<ReactToolCall> toolCalls) {
@@ -343,11 +453,16 @@ public class ReactExecutor implements IAgentExecutionEngine {
         try {
             ToolExecutionResult execResult = toolExecutorPort.executeWithMetadata(
                     agentId, toolCall.getName(), toolCall.getArguments());
+            // 工具失败时 output 为 null；回灌给模型前归一化为可读文本，
+            // 既让模型知道失败原因，也避免下游 SDK 因 content 为 null 抛 NPE
+            String output = execResult.output() != null ? execResult.output()
+                    : "工具执行失败: " + (execResult.errorMessage() != null
+                    ? execResult.errorMessage() : "未知错误");
             return ReactToolResult.builder()
                     .id(toolCall.getId())
                     .name(toolCall.getName())
                     .arguments(toolCall.getArguments())
-                    .output(execResult.output())
+                    .output(output)
                     .failed(!execResult.success())
                     .durationMs(execResult.durationMs())
                     .serverName(execResult.serverName())

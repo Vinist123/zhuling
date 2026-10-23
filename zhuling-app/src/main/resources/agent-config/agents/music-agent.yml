@@ -21,7 +21,7 @@ module:
   react:
     max-steps: 10
     max-tool-calls: 5
-    llm-timeout-ms: 30000
+    llm-timeout-ms: 60000
   mcp:
     enabled: false
     mode: local

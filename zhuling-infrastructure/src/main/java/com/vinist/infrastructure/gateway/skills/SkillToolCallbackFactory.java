@@ -40,10 +40,12 @@ public class SkillToolCallbackFactory {
                         + describeSkillPackages(skillPackages))
                 .inputType(LoadSkillRequest.class)
                 .build();
+        String scriptInventory = buildScriptInventory(skillPackages);
         ToolCallback executeSkillCallback = FunctionToolCallback
                 .builder("execute_skill_script", (ExecuteSkillScriptRequest request) -> executeSkillScript(skillPackages, request))
-                .description("执行已加载 Skill 包内的 Python 或 Shell 脚本，文件参数使用 workspace:相对路径。"
-                        + "⚠️ 调用前必须先调用 load_skill 获取可用脚本清单，禁止猜测 scriptPath。")
+                .description("执行当前 Agent 已加载 Skill 包内的 Python 或 Shell 脚本，文件参数使用 workspace:相对路径。"
+                        + "\n⚠️ 禁止猜测 scriptPath，必须严格使用以下已登记路径：\n" + scriptInventory
+                        + "\n调用前可先调用 load_skill 获取完整使用说明；skillName 必须与下方 Skill 名称一致。")
                 .inputType(ExecuteSkillScriptRequest.class)
                 .build();
         return new ToolCallback[]{loadSkillCallback, executeSkillCallback};
@@ -94,6 +96,34 @@ public class SkillToolCallbackFactory {
         return String.join("；", descriptions);
     }
 
+    /**
+     * 把每个 Skill 包内真实存在的脚本路径内联到工具描述中，
+     * 让模型无需猜测 scriptPath（避免臆造 query_singer.py 之类不存在的脚本）。
+     */
+    private String buildScriptInventory(Map<String, ResolvedSkillPackage> skillPackages) {
+        List<String> items = new ArrayList<>();
+        for (ResolvedSkillPackage skillPackage : skillPackages.values()) {
+            List<String> scripts = new ArrayList<>();
+            Path scriptsDir = skillPackage.packageRoot().resolve("scripts");
+            if (Files.isDirectory(scriptsDir)) {
+                try (Stream<Path> stream = Files.walk(scriptsDir)) {
+                    stream.filter(Files::isRegularFile)
+                            .filter(p -> {
+                                String name = p.getFileName().toString();
+                                return name.endsWith(".py") || name.endsWith(".sh");
+                            })
+                            .forEach(p -> scripts.add("scripts/" + scriptsDir.relativize(p)
+                                    .toString().replace('\\', '/')));
+                } catch (IOException ignored) {
+                    // 扫描失败时仅列出 Skill 名称，脚本清单交由 load_skill 兜底
+                }
+            }
+            items.add(skillPackage.name() + (scripts.isEmpty()
+                    ? "（无脚本）" : " → " + String.join(", ", scripts)));
+        }
+        return String.join("；", items);
+    }
+
     private String executeSkillScript(Map<String, ResolvedSkillPackage> skillPackages,
                                       ExecuteSkillScriptRequest request) {
         if (request == null || request.skillName() == null || request.skillName().isBlank()) {
@@ -103,7 +133,13 @@ public class SkillToolCallbackFactory {
         if (skillPackage == null) {
             throw new IllegalArgumentException("当前 Agent 未配置 Skill: " + request.skillName());
         }
-        return skillScriptExecutor.execute(skillPackage, request.scriptPath(), request.arguments());
+        try {
+            return skillScriptExecutor.execute(skillPackage, request.scriptPath(), request.arguments());
+        } catch (IllegalArgumentException ex) {
+            // 脚本路径非法时，把可用清单附在错误信息里，便于模型自我纠正路径
+            throw new IllegalArgumentException(ex.getMessage()
+                    + "。该 Skill 可用脚本清单：\n" + listAvailableScripts(skillPackage), ex);
+        }
     }
 
     public record LoadSkillRequest(String name) {

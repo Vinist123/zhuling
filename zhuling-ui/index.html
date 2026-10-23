@@ -763,6 +763,101 @@
         return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s`;
     }
 
+    function truncate(text, maxLength) {
+        if (!text) return text;
+        return text.length <= maxLength ? text : text.slice(0, maxLength) + '…';
+    }
+
+    /** 从工具入参/结果 JSON 中安全提取某个字段 */
+    function extractJsonField(text, field) {
+        if (!text) return null;
+        try {
+            const obj = JSON.parse(text);
+            if (obj && typeof obj === 'object' && obj[field] != null) return String(obj[field]);
+        } catch (_) { /* 非 JSON，忽略 */ }
+        return null;
+    }
+
+    /** 尝试从 execute_skill_script 的 JSON 输出中解析歌曲数量 */
+    function tryParseSongCount(output) {
+        if (!output) return null;
+        try {
+            const obj = JSON.parse(output);
+            if (obj && Array.isArray(obj.songs)) return obj.songs.length;
+        } catch (_) { /* 忽略 */ }
+        return null;
+    }
+
+    /**
+     * 面向用户的工具调用摘要（自然语言，隐藏开发者细节）。
+     * 原始参数/返回由 createToolBlock 降级为默认折叠的"开发者原始数据"。
+     */
+    function friendlyToolSummary(payload) {
+        const name = payload.toolName || 'unknown';
+        const args = payload.inputPreview || '';
+        if (name === 'load_skill') {
+            const skill = extractJsonField(args, 'name') || '已配置 Skill';
+            return `加载 Skill 使用说明（${skill}）`;
+        }
+        if (name === 'execute_skill_script') {
+            const script = extractJsonField(args, 'scriptPath') || '脚本';
+            return `执行脚本 ${script}`;
+        }
+        return `调用工具 ${name}`;
+    }
+
+    /** 面向用户的工具结果摘要 */
+    function friendlyToolResult(payload) {
+        if (payload.success === false) {
+            return `执行失败：${payload.errorMessage || payload.error || '工具未返回结果'}`;
+        }
+        const name = payload.toolName || '';
+        const output = payload.outputPreview || '';
+        if (name === 'load_skill') {
+            return '已加载 Skill 使用说明与脚本清单。';
+        }
+        if (name === 'execute_skill_script') {
+            const count = tryParseSongCount(output);
+            if (count !== null) return `查询完成，共 ${count} 首歌曲。`;
+            if (output) return `执行完成：${truncate(output, 80)}`;
+            return '执行完成。';
+        }
+        if (output) return truncate(output, 140);
+        return '执行完成。';
+    }
+
+    /** 构建统一的工具调用展示块：自然语言摘要 + 默认折叠的原始数据 */
+    function createToolBlock(payload) {
+        const detail = document.createElement('details');
+        detail.className = 'trace-detail';
+        const summary = createElement('summary', '',
+            `${friendlyToolSummary(payload)} · 运行中`);
+        detail.appendChild(summary);
+        const content = createElement('div', 'trace-data');
+        detail.appendChild(content);
+
+        const resultNode = createElement('div', 'tool-friendly', friendlyToolResult(payload));
+        content.appendChild(resultNode);
+
+        const raw = document.createElement('details');
+        raw.className = 'trace-detail raw-details';
+        const rawSummary = createElement('summary', '', '开发者原始数据');
+        raw.appendChild(rawSummary);
+        const rawContent = createElement('div', 'trace-data');
+        const rawParts = [payload.inputPreview, payload.outputPreview || payload.errorMessage]
+            .filter(Boolean);
+        rawContent.textContent = rawParts.length ? rawParts.join('\n\n') : '（无）';
+        raw.appendChild(rawContent);
+        content.appendChild(raw);
+
+        return { detail, summary, resultNode, rawContent };
+    }
+
+    function rawTextOf(payload) {
+        return [payload.inputPreview, payload.outputPreview || payload.errorMessage]
+            .filter(Boolean).join('\n\n');
+    }
+
     function renderMarkdown(text) {
         if (!text) return '';
         if (!window.marked || !window.DOMPurify) return escapeHtml(text);
@@ -1012,7 +1107,10 @@
             const content = createElement('div', 'trace-data');
             detail.appendChild(summary);
             detail.appendChild(content);
-            view.track.appendChild(detail);
+            // Workflow 模式下，游离的推理事件也归入当前 Node 容器
+            const parent = (view.workflowMode && view.currentWorkflowNode)
+                ? view.currentWorkflowNode.container : view.track;
+            parent.appendChild(detail);
             view.reasoningNode = { detail, summary, content };
         }
         if (status) view.reasoningNode.summary.textContent = `推理 · ${status}`;
@@ -1020,15 +1118,9 @@
     }
 
     function appendToolStarted(view, payload) {
-        const detail = document.createElement('details');
-        detail.className = 'trace-detail';
-        const summary = createElement('summary', '', `工具 · ${payload.toolName || 'unknown'} · 运行中`);
-        const content = createElement('div', 'trace-data');
-        content.textContent = payload.inputPreview || '无输入预览';
-        detail.appendChild(summary);
-        detail.appendChild(content);
-        view.track.appendChild(detail);
-        const tool = { name: payload.toolName, detail, summary, content, completed: false };
+        const block = createToolBlock(payload);
+        view.track.appendChild(block.detail);
+        const tool = { name: payload.toolName, block, completed: false };
         view.toolRows.push(tool);
         return tool;
     }
@@ -1037,9 +1129,10 @@
         const tool = [...view.toolRows].reverse().find(item => !item.completed && item.name === payload.toolName)
             || appendToolStarted(view, payload);
         tool.completed = true;
-        tool.summary.textContent = `工具 · ${payload.toolName || 'unknown'} · ${payload.success === false ? '失败' : '完成'}`;
-        const output = payload.success === false ? (payload.error || payload.errorType || '工具执行失败') : (payload.outputPreview || '无输出预览');
-        tool.content.textContent = output;
+        tool.block.summary.textContent =
+            `${friendlyToolSummary(payload)} · ${payload.success === false ? '失败' : '完成'}`;
+        tool.block.resultNode.textContent = friendlyToolResult(payload);
+        tool.block.rawContent.textContent = rawTextOf(payload) || '（无）';
         appendTraceRow(view, payload.success === false ? 'failed' : 'done', '工具调用', formatDuration(payload.durationMs));
     }
 
@@ -1049,6 +1142,8 @@
         const timing = metadata.timing || {};
         if (reasoning.content) appendReasoning(view, reasoning.content, reasoning.status, reasoning.note);
         else if (reasoning.status || reasoning.note) appendTraceRow(view, 'done', '推理', reasoning.status || reasoning.note);
+        // Workflow 会话：从 metadata.workflow 重绘节点轨迹（实时阶段的 Node 容器在刷新后被还原）
+        hydrateWorkflowTrace(view, metadata.workflow);
         tools.forEach(tool => {
             appendToolStarted(view, tool);
             appendToolCompleted(view, tool);
@@ -1057,12 +1152,57 @@
         appendTurnSummary(view, metadata);
     }
 
+    /** 从 metadata.workflow 重绘 Workflow 节点轨迹（与实时 ensureWorkflowNode/completeWorkflowNode 同构） */
+    function hydrateWorkflowTrace(view, workflow) {
+        if (!workflow || !Array.isArray(workflow.nodes) || workflow.nodes.length === 0) return;
+        view.workflowMode = true;
+        view.row.dataset.agentMode = 'workflow';
+        appendTraceRow(view, 'done', 'Workflow 模式', '多 Agent 受控 DAG 调度');
+        const joinIds = computeJoinNodeIds(workflow.nodes);
+        workflow.nodes.forEach(node => {
+            const container = createElement('div', 'react-step');
+            const failed = node.success === false;
+            const header = createElement('div', failed ? 'trace-row failed' : 'trace-row done');
+            header.appendChild(createElement('span', 'trace-indicator'));
+            const note = describeWorkflowNode(node, joinIds.has(node.nodeId));
+            header.appendChild(createElement('span', 'trace-detail',
+                `Node ${node.index} · ${node.nodeName || node.nodeId || '未命名'} · ${failed ? '失败' : '完成'}${note}`));
+            if (node.durationMs !== undefined && node.durationMs !== null) {
+                header.appendChild(createElement('time', '', formatDuration(node.durationMs)));
+            }
+            container.appendChild(header);
+            if (node.outputPreview) {
+                const detail = document.createElement('details');
+                detail.className = 'trace-detail';
+                detail.appendChild(createElement('summary', '', '输出'));
+                const content = createElement('div', 'trace-data');
+                content.textContent = node.outputPreview;
+                detail.appendChild(content);
+                container.appendChild(detail);
+            }
+            if (node.error) {
+                const detail = document.createElement('details');
+                detail.className = 'trace-detail';
+                detail.appendChild(createElement('summary', '', '错误'));
+                const content = createElement('div', 'trace-data');
+                content.textContent = node.error;
+                detail.appendChild(content);
+                container.appendChild(detail);
+            }
+            view.track.appendChild(container);
+        });
+        const completed = workflow.exitReason === 'COMPLETED';
+        appendTraceRow(view, completed ? 'done' : 'failed', 'Workflow 执行结束',
+            `${workflow.nodeCount || workflow.nodes.length} 个节点 · ${formatDuration(workflow.durationMs)}`);
+    }
+
     function appendTurnSummary(view, metadata) {
         if (view.summary) view.summary.remove();
         const usage = metadata.usage || {};
         const context = metadata.context || {};
         const timing = metadata.timing || {};
         const chips = [
+            (metadata.workflow && metadata.workflow.exitReason) ? `Workflow · ${metadata.workflow.nodeCount || 0} 节点` : null,
             (metadata.react && metadata.react.mode === 'react') ? `ReAct · ${metadata.react.stepCount || 0} 步` : null,
             usage.totalTokens !== undefined && usage.totalTokens !== null ? `${usage.totalTokens} tokens` : null,
             Array.isArray(metadata.toolCalls) ? `${metadata.toolCalls.length} tools` : null,
@@ -1148,6 +1288,38 @@
             }
         });
 
+        const workflow = metadata.workflow || {};
+        if (workflow.mode === 'workflow' || workflow.exitReason || Array.isArray(workflow.nodes)) {
+            addInspectorSection('Workflow 过程', container => {
+                appendKeyValues(container, [
+                    ['Workflow ID', workflow.workflowId],
+                    ['Exit Reason', workflow.exitReason],
+                    ['Node Count', workflow.nodeCount],
+                    ['Duration', workflow.durationMs != null ? formatDuration(workflow.durationMs) : null],
+                    ['Error', workflow.errorMessage]
+                ]);
+                const nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+                if (nodes.length > 0) {
+                    const block = createElement('div', 'detail-block');
+                    block.appendChild(createElement('div', 'detail-title', `Nodes (${nodes.length})`));
+                    const joinIds = computeJoinNodeIds(nodes);
+                    nodes.forEach(node => {
+                        const line = createElement('div', 'detail-note');
+                        const route = describeWorkflowNode(node, joinIds.has(node.nodeId));
+                        line.textContent = `#${node.index} · ${node.nodeName || node.nodeId}`
+                            + (node.nodeType ? ` · ${node.nodeType}` : '')
+                            + (node.success === false ? ' · 失败' : '')
+                            + route
+                            + (node.durationMs != null ? ` · ${formatDuration(node.durationMs)}` : '');
+                        block.appendChild(line);
+                        const preview = node.outputPreview || node.error;
+                        if (preview) block.appendChild(createElement('pre', '', truncate(preview, 160)));
+                    });
+                    container.appendChild(block);
+                }
+            }, false);
+        }
+
         const react = metadata.react || {};
         if (react.mode === 'react' || react.exitReason) {
             addInspectorSection('ReAct 过程', container => {
@@ -1223,8 +1395,14 @@
                     const block = createElement('div', 'detail-block');
                     block.appendChild(createElement('div', 'detail-title', `${index + 1}. ${tool.toolName || 'unknown'} · ${tool.success === false ? 'FAILED' : 'DONE'}`));
                     block.appendChild(createElement('div', 'detail-note', `${formatValue(tool.toolType)} · ${formatDuration(tool.durationMs)}`));
-                    if (tool.inputPreview) block.appendChild(createElement('pre', '', tool.inputPreview));
-                    if (tool.outputPreview || tool.errorMessage) block.appendChild(createElement('pre', '', tool.outputPreview || tool.errorMessage));
+                    // load_skill 的 Skill 内部说明不在此暴露，仅保留入参（skill 名称）
+                    const isLoadSkill = (tool.toolName === 'load_skill');
+                    if (tool.inputPreview && !isLoadSkill) block.appendChild(createElement('pre', '', tool.inputPreview));
+                    if (tool.outputPreview || tool.errorMessage) {
+                        block.appendChild(createElement('pre', '', isLoadSkill
+                            ? '（已隐藏 Skill 内部使用说明）'
+                            : (tool.outputPreview || tool.errorMessage)));
+                    }
                     container.appendChild(block);
                 });
             }
@@ -1372,6 +1550,12 @@
             completeReactStep(turn, payload);
         } else if (data.type === 'agent.loop.completed') {
             finalizeReactLoop(turn, payload);
+        } else if (data.type === 'workflow.node.started') {
+            ensureWorkflowNode(turn, payload);
+        } else if (data.type === 'workflow.node.completed') {
+            completeWorkflowNode(turn, payload);
+        } else if (data.type === 'workflow.completed') {
+            finalizeWorkflow(turn, payload);
         }
         selectMetadata(turn.metadata, turn.view.row);
         scrollMessages();
@@ -1399,7 +1583,7 @@
         if (turn.view.reactMode) return;
         turn.view.reactMode = true;
         turn.metadata.react = turn.metadata.react || { mode: 'react', stepCount: 0, totalToolCalls: 0 };
-        turn.view.row.dataset.agentMode = 'react';
+        if (!turn.view.workflowMode) turn.view.row.dataset.agentMode = 'react';
         appendTraceRow(turn.view, 'active', 'ReAct 模式', '启用多步推理-行动循环');
     }
 
@@ -1414,7 +1598,10 @@
         header.appendChild(createElement('span', 'trace-detail', `Step ${index} · 思考中`));
         header.appendChild(createElement('time', '', formatTime()));
         container.appendChild(header);
-        turn.view.track.appendChild(container);
+        // 在 Workflow 模式下，将 Step 容器嵌套进当前 Node 容器，使 Node 标题→推理/工具→输出 内聚
+        const parent = (turn.view.workflowMode && turn.view.currentWorkflowNode)
+            ? turn.view.currentWorkflowNode.container : turn.view.track;
+        parent.appendChild(container);
 
         const step = { index, container, header, reasoningNode: null, toolRows: [], toolCallCount: 0, done: false };
         turn.view.steps.set(index, step);
@@ -1441,15 +1628,9 @@
     function appendStepTool(turn, index, payload) {
         const step = turn.view.steps.get(index) || turn.view.currentStep;
         if (!step) return;
-        const detail = document.createElement('details');
-        detail.className = 'trace-detail';
-        const summary = createElement('summary', '', `工具 · ${payload.toolName || 'unknown'} · 运行中`);
-        const content = createElement('div', 'trace-data');
-        content.textContent = payload.inputPreview || '无输入预览';
-        detail.appendChild(summary);
-        detail.appendChild(content);
-        step.container.appendChild(detail);
-        const tool = { name: payload.toolName, detail, summary, content, completed: false };
+        const block = createToolBlock(payload);
+        step.container.appendChild(block.detail);
+        const tool = { name: payload.toolName, block, completed: false };
         step.toolRows.push(tool);
         return tool;
     }
@@ -1460,9 +1641,10 @@
         const tool = [...step.toolRows].reverse().find(item => !item.completed && item.name === payload.toolName)
             || appendStepTool(turn, index, payload);
         tool.completed = true;
-        tool.summary.textContent = `工具 · ${payload.toolName || 'unknown'} · ${payload.success === false ? '失败' : '完成'}`;
-        const output = payload.success === false ? (payload.errorMessage || '工具执行失败') : (payload.outputPreview || '无输出预览');
-        tool.content.textContent = output;
+        tool.block.summary.textContent =
+            `${friendlyToolSummary(payload)} · ${payload.success === false ? '失败' : '完成'}`;
+        tool.block.resultNode.textContent = friendlyToolResult(payload);
+        tool.block.rawContent.textContent = rawTextOf(payload) || '（无）';
         appendTraceRow(turn.view, payload.success === false ? 'failed' : 'done',
             `Step ${index} 工具`, formatDuration(payload.durationMs));
     }
@@ -1501,6 +1683,107 @@
         if (turn.activeStep && !turn.activeStep.done) {
             turn.activeStep.header.className = 'trace-row done';
         }
+    }
+
+    /** 从节点路由关系推导汇聚(Join)节点：被 ≥2 个分支指向的节点 */
+    function computeJoinNodeIds(nodes) {
+        const fanIn = new Map();
+        (nodes || []).forEach(n => {
+            const ids = (Array.isArray(n.routedToNodeIds) && n.routedToNodeIds.length)
+                ? n.routedToNodeIds
+                : (n.routedToNodeId ? [n.routedToNodeId] : []);
+            ids.forEach(t => fanIn.set(t, (fanIn.get(t) || 0) + 1));
+        });
+        const joins = new Set();
+        fanIn.forEach((count, id) => { if (count >= 2) joins.add(id); });
+        return joins;
+    }
+
+    /** 生成 Workflow 节点路由段（含前导分隔符）：并行扇出 / 单跳 / 终止，可附加汇聚徽标 */
+    function describeWorkflowNode(node, isJoin) {
+        const ids = Array.isArray(node.routedToNodeIds) ? node.routedToNodeIds : [];
+        const fanOut = ids.length >= 2 ? ` 并行扇出 → ${ids.join(' · ')}` : '';
+        const single = ids.length === 1 ? ids[0] : (node.routedToNodeId || null);
+        const route = fanOut || (single ? ` → ${single}` : ' · 终止');
+        const join = isJoin ? ' · 汇聚' : '';
+        return route + join;
+    }
+
+    function markWorkflowMode(turn) {
+        if (turn.view.workflowMode) return;
+        turn.view.workflowMode = true;
+        turn.metadata.workflow = turn.metadata.workflow || { mode: 'workflow', nodeCount: 0 };
+        turn.view.row.dataset.agentMode = 'workflow';
+        appendTraceRow(turn.view, 'active', 'Workflow 模式', '多 Agent 受控 DAG 调度');
+    }
+
+    function ensureWorkflowNode(turn, payload) {
+        const index = Number(payload.index);
+        if (!Number.isFinite(index)) return;
+        markWorkflowMode(turn);
+        // 每个节点一个独立容器，内部 AGENT 节点的推理/工具事件按到达顺序交错展示
+        const container = createElement('div', 'react-step');
+        const header = createElement('div', 'trace-row active');
+        header.appendChild(createElement('span', 'trace-indicator'));
+        const typeLabel = payload.nodeType === 'AGENT' ? 'Agent'
+            : payload.nodeType === 'CONDITION' ? '条件路由'
+                : payload.nodeType === 'CODE' ? '代码' : '节点';
+        header.appendChild(createElement('span', 'trace-detail',
+            `Node ${index} · ${payload.nodeName || payload.nodeId || '未命名'} · ${typeLabel} · 执行中`));
+        header.appendChild(createElement('time', '', formatTime()));
+        container.appendChild(header);
+        turn.view.track.appendChild(container);
+        if (!turn.view.workflowNodes) turn.view.workflowNodes = new Map();
+        const node = { index, container, header, done: false };
+        turn.view.workflowNodes.set(index, node);
+        // 标记"当前 Node 容器"，后续该 Node 的 React Step 将嵌套进此容器
+        turn.view.currentWorkflowNode = node;
+    }
+
+    function completeWorkflowNode(turn, payload) {
+        const index = Number(payload.index);
+        markWorkflowMode(turn);
+        turn.metadata.workflow = turn.metadata.workflow || { mode: 'workflow' };
+        turn.metadata.workflow.nodeCount = Math.max(turn.metadata.workflow.nodeCount || 0, index);
+        // 累加本节点指向的下游，用于推导"汇聚(Join)"徽标（下游节点完成时回溯命中）
+        if (!turn.view.workflowFanIn) turn.view.workflowFanIn = new Map();
+        const outTargets = (Array.isArray(payload.routedToNodeIds) && payload.routedToNodeIds.length)
+            ? payload.routedToNodeIds
+            : (payload.routedToNodeId ? [payload.routedToNodeId] : []);
+        outTargets.forEach(t => turn.view.workflowFanIn
+            .set(t, (turn.view.workflowFanIn.get(t) || 0) + 1));
+        const isJoin = (turn.view.workflowFanIn.get(payload.nodeId) || 0) >= 2;
+        const node = (turn.view.workflowNodes || new Map()).get(index);
+        if (!node) return;
+        node.done = true;
+        node.header.className = payload.success === false ? 'trace-row failed' : 'trace-row done';
+        const note = describeWorkflowNode(payload, isJoin);
+        node.header.querySelector('.trace-detail').textContent =
+            `Node ${index} · ${payload.nodeName || payload.nodeId || '未命名'} · ${payload.success === false ? '失败' : '完成'}${note}`;
+        if (payload.outputPreview) {
+            const detail = document.createElement('details');
+            detail.className = 'trace-detail';
+            detail.appendChild(createElement('summary', '', '输出'));
+            const content = createElement('div', 'trace-data');
+            content.textContent = payload.outputPreview;
+            detail.appendChild(content);
+            node.container.appendChild(detail);
+        }
+        // 该 Node 的 Step 已全部到达，解除"当前 Node"标记（下一个 Node.started 会重新设置）
+        if (turn.view.currentWorkflowNode === node) turn.view.currentWorkflowNode = null;
+    }
+
+    function finalizeWorkflow(turn, payload) {
+        markWorkflowMode(turn);
+        turn.metadata.workflow = Object.assign(turn.metadata.workflow || { mode: 'workflow' }, {
+            mode: 'workflow',
+            exitReason: payload.exitReason,
+            nodeCount: payload.nodeCount,
+            durationMs: payload.durationMs,
+            errorMessage: payload.errorMessage || null
+        });
+        appendTraceRow(turn.view, payload.exitReason === 'COMPLETED' ? 'done' : 'failed',
+            'Workflow 执行结束', `${payload.nodeCount} 个节点 · ${formatDuration(payload.durationMs)}`);
     }
 
     async function streamChat(sessionId, message) {

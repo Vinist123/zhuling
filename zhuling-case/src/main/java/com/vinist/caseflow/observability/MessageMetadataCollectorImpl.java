@@ -13,6 +13,7 @@ import com.vinist.domain.agent.model.telemetry.ReactProcessTelemetry;
 import com.vinist.domain.agent.model.telemetry.ReactStepSummary;
 import com.vinist.domain.agent.model.telemetry.ToolCallTelemetry;
 import com.vinist.domain.agent.model.telemetry.TurnTelemetry;
+import com.vinist.domain.agent.model.telemetry.WorkflowProcessTelemetry;
 import com.vinist.domain.agent.service.IAgentRuntimeRegistry;
 import com.vinist.domain.agent.service.IMessageMetadataCollector;
 import com.vinist.domain.agent.service.ITurnTelemetryService;
@@ -126,7 +127,44 @@ public class MessageMetadataCollectorImpl implements IMessageMetadataCollector {
                 Boolean.FALSE.equals(observabilityConfig != null ? observabilityConfig.getToolCallEnabled() : null)
                         ? null : createToolCalls(telemetry));
         metadata.put(MessageMetadataKeys.REACT, createReact(telemetry, observabilityConfig));
+        metadata.put(MessageMetadataKeys.WORKFLOW, createWorkflow(telemetry));
         return metadata;
+    }
+
+    private Map<String, Object> createWorkflow(TurnTelemetry telemetry) {
+        WorkflowProcessTelemetry workflow = telemetry != null ? telemetry.getWorkflowProcess() : null;
+        if (workflow == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> workflowSection = new LinkedHashMap<>();
+        workflowSection.put(MessageMetadataKeys.WORKFLOW_EXIT_REASON, workflow.getExitReason());
+        workflowSection.put(MessageMetadataKeys.WORKFLOW_NODE_COUNT, workflow.getNodeCount());
+        workflowSection.put(MessageMetadataKeys.WORKFLOW_DURATION_MS, workflow.getDurationMs());
+        workflowSection.put(MessageMetadataKeys.WORKFLOW_ERROR_MESSAGE,
+                truncate(workflow.getErrorMessage(), MessageMetadataPolicy.MAX_ERROR_MESSAGE_LENGTH));
+        workflowSection.put(MessageMetadataKeys.WORKFLOW_NODES, createWorkflowNodes(workflow.getNodes()));
+        return workflowSection;
+    }
+
+    private List<Map<String, Object>> createWorkflowNodes(List<WorkflowProcessTelemetry.NodeSummary> nodes) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        if (nodes == null) {
+            return list;
+        }
+        for (WorkflowProcessTelemetry.NodeSummary node : nodes) {
+            LinkedHashMap<String, Object> item = new LinkedHashMap<>();
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_INDEX, node.getIndex());
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_ID, node.getNodeId());
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_NAME, node.getNodeName());
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_TYPE, node.getNodeType());
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_OUTPUT_PREVIEW, node.getOutputPreview());
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_ROUTED_TO, node.getRoutedToNodeId());
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_DURATION_MS, node.getDurationMs());
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_SUCCESS, node.getSuccess());
+            item.put(MessageMetadataKeys.WORKFLOW_NODE_ERROR, node.getError());
+            list.add(item);
+        }
+        return list;
     }
 
     private Map<String, Object> createModel(ModuleConfig.ChatModelConfig chatModelConfig,

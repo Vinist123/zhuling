@@ -224,11 +224,12 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.0</version>
                 <configuration>
                     <source>${java.version}</source>
                     <target>${java.version}</target>
                     <encoding>${project.build.sourceEncoding}</encoding>
+                    <!-- 保留方法参数名，供 Spring MVC 无注解绑定（如 @PathVariable String type）使用 -->
+                    <parameters>true</parameters>
                 </configuration>
             </plugin>
             <plugin>

@@ -116,13 +116,13 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.6</version>
                 <configuration>
-                    <skipTests>true</skipTests>
+                    <!-- ApiTest 为 @SpringBootTest（需完整上下文+数据库），排除出常规构建；
+                         其余单元测试（如 WorkflowSchedulerTest）正常执行 -->
+                    <excludes>
+                        <exclude>**/ApiTest.java</exclude>
+                    </excludes>
                     <testFailureIgnore>false</testFailureIgnore>
-                    <includes>
-                        <include>**/*Test.java</include>
-                    </includes>
                 </configuration>
             </plugin>
             <plugin>

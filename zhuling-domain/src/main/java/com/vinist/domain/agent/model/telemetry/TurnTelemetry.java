@@ -47,6 +47,9 @@ public class TurnTelemetry {
     /** ReAct 执行过程级观测摘要（仅当本轮走了 ReAct 内核时非空） */
     private ReactProcessTelemetry reactProcess;
 
+    /** Workflow 执行过程级观测摘要（仅当本轮走了 Workflow 调度时非空） */
+    private WorkflowProcessTelemetry workflowProcess;
+
     /** 是否允许发布 reasoning SSE 事件（null/true = 允许，false = 禁止） */
     private Boolean reasoningContentEnabled;
 

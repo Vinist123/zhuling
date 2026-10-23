@@ -130,7 +130,10 @@ public class SpringAiNativeReactModelPort implements IReactModelPort {
     }
 
     private ToolResponseMessage.ToolResponse toToolResponse(ReactToolResult result) {
-        return new ToolResponseMessage.ToolResponse(result.getId(), result.getName(), result.getOutput());
+        // 工具失败时 output 可能为 null；模型协议要求 tool message 必须有内容，
+        // 否则下游 SDK（如 OpenAI）构造请求时会因 content 为 null 抛 NPE
+        String content = result.getOutput() != null ? result.getOutput() : "工具执行失败，无输出";
+        return new ToolResponseMessage.ToolResponse(result.getId(), result.getName(), content);
     }
 
     private com.vinist.domain.agent.model.telemetry.ChatUsageMetrics extractUsage(ChatResponse response) {
